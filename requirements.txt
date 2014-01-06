@@ -1,0 +1,4 @@
+boto>=2.9.0
+PyYAML>=3.10
+simplejson
+

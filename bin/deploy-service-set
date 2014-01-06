@@ -1,0 +1,300 @@
+#!/usr/bin/env python
+
+import argparse
+import boto.ec2
+import datetime
+import hashlib
+import os
+import simplejson
+import sys
+import subprocess
+import time
+import urllib2
+import yaml
+
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+DEVNULL = open(os.devnull, 'w')
+
+cli = argparse.ArgumentParser(description='Deploy a docker service.')
+cli.add_argument('--env', help='Environment (e.g. dev, prod)')
+cli.add_argument('name', help='Service name for the application.')
+cli.add_argument('path', help='File or URL configuration path for the docker.')
+cli.set_defaults(env='dev')
+
+cliargs = cli.parse_args()
+
+if not os.path.exists('/var/lib/scs-docker'):
+  os.mkdir('/var/lib/scs-docker', 0700)
+if not os.path.exists('/var/lib/scs-docker/source'):
+  os.mkdir('/var/lib/scs-docker/source', 0700)
+
+if os.path.exists('/var/lib/scs-docker/pstate.json'):
+  pstate = simplejson.load(open('/var/lib/scs-docker/pstate.json', 'r'))
+else:
+  pstate = {}
+  pstate['services'] = {}
+
+pstate['last_run'] = datetime.datetime.now().isoformat()
+
+def closeout():
+  simplejson.dump(pstate, open('/var/lib/scs-docker/pstate.json', 'w'))
+
+sys.excepthook = closeout
+
+ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+
+devicemap = {
+  '/dev/sda1' : {
+    'local' : '/dev/xvda1',
+    'usable' : True,
+  },
+  '/dev/sdf' : {
+    'local' : '/dev/xvdf',
+    'usable' : True,
+  },
+  '/dev/sdg' : {
+    'local' : '/dev/xvdg',
+    'usable' : True,
+  },
+  '/dev/sdh' : {
+    'local' : '/dev/xvdh',
+    'usable' : True,
+  },
+  '/dev/sdi' : {
+    'local' : '/dev/xvdi',
+    'usable' : True,
+  },
+  '/dev/sdj' : {
+    'local' : '/dev/xvdj',
+    'usable' : True,
+  },
+  '/dev/sdk' : {
+    'local' : '/dev/xvdk',
+    'usable' : True,
+  },
+  '/dev/sdl' : {
+    'local' : '/dev/xvdl',
+    'usable' : True,
+  },
+  '/dev/sdm' : {
+    'local' : '/dev/xvdm',
+    'usable' : True,
+  },
+  '/dev/sdn' : {
+    'local' : '/dev/xvdn',
+    'usable' : True,
+  },
+  '/dev/sdo' : {
+    'local' : '/dev/xvdo',
+    'usable' : True,
+  },
+  '/dev/sdp' : {
+    'local' : '/dev/xvdp',
+    'usable' : True,
+  },
+}
+
+# basics
+
+ec2 = boto.ec2.connect_to_region(ec2instance['region'])
+
+sys.stdout.write('whoami: instance-id: %s\n' % ec2instance['instanceId'])
+sys.stdout.write('whoami: region: %s\n' % ec2instance['region'])
+sys.stdout.write('whoami: availability-zone: %s\n' % ec2instance['availabilityZone'])
+
+# volumes
+
+volumes = ec2.get_all_volumes(filters = { 'attachment.instance-id' : ec2instance['instanceId'] })
+
+for volume in volumes:
+    devicemap[volume.attach_data.device]['usable'] = False
+    devicemap[volume.attach_data.device]['volume_id'] = volume.id
+
+    sys.stdout.write('whoami: disk: %s --> %s\n' % ( volume.attach_data.device, volume.id ))
+
+
+# gogo
+
+config = yaml.safe_load(urllib2.urlopen(cliargs.path).read())
+
+for srvkey in config['services']:
+  srvval = config['services'][srvkey]
+  srvid = '%s--%s--%s' % ( cliargs.env, cliargs.name, srvkey )
+
+  dockerrun = '/usr/bin/docker run -t -i'
+
+  if srvid not in (pstate['services']):
+    pstate['services'][srvid] = {
+      'volumes' : {}
+    }
+
+  if 'git' in srvval['source']:
+    ref = 'master'
+
+    if 'ref' in srvval['source']:
+      ref = srvval['source']
+
+    srcpath = '/var/lib/scs-docker/source/%s' % hashlib.md5('%s:%s' % ( srvval['source']['git'], ref )).hexdigest()
+
+    if not os.path.exists(srcpath):
+      sys.stdout.write('%s: source: git clone %s\n' % ( srvid, srvval['source']['git'] ))
+
+      subprocess.check_call([ 'git', 'clone', srvval['source']['git'], srcpath ], stdout=DEVNULL, stderr=DEVNULL)
+
+    os.chdir(srcpath)
+
+
+    sys.stdout.write('%s: source: reset\n' % srvid)
+
+    subprocess.check_call([ 'git', 'reset', '--hard' ], stdout=DEVNULL, stderr=DEVNULL)
+    subprocess.check_call([ 'git', 'checkout', ref ], stdout=DEVNULL, stderr=DEVNULL)
+
+  for portmap in srvval['ports']:
+    dockerrun = "%s -p %s:%s" % ( dockerrun, portmap[0], portmap[1] )
+  
+  for volkey in srvval['volumes']:
+    volval = srvval['volumes'][volkey] 
+
+    voldevice = False
+    mounted = False
+
+    if volkey in pstate['services'][srvid]['volumes']:
+      voldevice = pstate['services'][srvid]['volumes'][volkey]
+
+    if False != voldevice:
+      if 0 == subprocess.call('/sbin/fdisk -l %s | /bin/grep "%s"' % ( devicemap[voldevice]['local'], devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
+        mounted = True
+
+
+    if False == mounted:
+      availablevols = ec2.get_all_volumes(filters = {
+        'status' : 'available',
+        'tag:Environment' : cliargs.env,
+        'tag:Service' : cliargs.name,
+        'tag:Name' : '%s/%s' % (srvkey, volkey )
+      })
+
+      if 0 == len(availablevols):
+        sys.stdout.write('%s: volume: %s: creating...\n' % ( srvid, volkey ))
+
+        args = volval['creation']
+        args['zone'] = ec2instance['availabilityZone'].encode('ascii')
+
+        volume = ec2.create_volume(**args)
+
+        ec2.create_tags(volume.id, {
+          'Environment' : cliargs.env,
+          'Service' : cliargs.name,
+          'Name' : '%s/%s' % ( srvkey, volkey ),
+        })
+
+        sys.stdout.write('%s: volume: %s: %s\n' % ( srvid, volkey, volume.id ))
+
+        while True:
+          statuscheck = ec2.get_all_volumes(volume.id).pop()
+
+          if 'available' == statuscheck.status:
+            break
+
+          time.sleep(2)
+          sys.stdout.write('.')
+
+        sys.stdout.write('%s: volume: %s: created\n' % ( srvid, volkey ))
+
+      else:
+        volume = availablevols.pop()
+
+      if False == voldevice:
+        for key in devicemap:
+          if devicemap[key]['usable']:
+            voldevice = key
+
+            break
+
+        if False == voldevice:
+          raise RuntimeError('No devices are available.')
+
+      devicemap[voldevice]['usable'] = False
+      devicemap[voldevice]['volume_id'] = volume.id
+
+      pstate['services'][srvid]['volumes'][volkey] = voldevice
+
+      sys.stdout.write('%s: volume: %s: physically mounting...\n' % ( srvid, volkey ))
+
+      ec2.attach_volume(volume.id, ec2instance['instanceId'], voldevice)
+
+      pstate['services'][srvid]['volumes'][volkey] = voldevice
+
+      while True:
+        statuscheck = ec2.get_all_volumes(volume.id).pop()
+
+        if 'in-use' == statuscheck.status:
+          break
+
+        time.sleep(2)
+        sys.stdout.write('.')
+
+      sys.stdout.write('%s: volume: %s: physically mounted\n' % ( srvid, volkey ))
+
+    if not os.path.exists('/mnt/docker-scs--%s--%s' % ( srvid, volkey )):
+      os.mkdir('/mnt/docker-scs--%s--%s' % ( srvid, volkey ))
+
+    if subprocess.call('/sbin/dumpe2fs %s' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
+      sys.stdout.write('%s: volume: %s: formatting...\n' % ( srvid, volkey ))
+
+      subprocess.check_call('/sbin/mkfs.%s %s' % ( volval['format'], devicemap[voldevice]['local'] ), shell=True)
+
+      sys.stdout.write('%s: volume: %s: formatted\n' % ( srvid, volkey ))
+
+    if subprocess.call('/bin/cat /proc/mounts | /bin/grep %s' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
+      sys.stdout.write('%s: volume: %s: logically mounting...\n' % ( srvid, volkey ))
+
+      subprocess.check_call('/bin/mount %s /mnt/docker-scs--%s--%s' % ( devicemap[voldevice]['local'], srvid, volkey ), shell=True)
+
+      sys.stdout.write('%s: volume: %s: logically mounted\n' % ( srvid, volkey ))
+
+    if subprocess.call('/bin/grep %s /etc/fstab' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
+      subprocess.check_call('/bin/echo "%s       /mnt/docker-scs--%s--%s   ext4    defaults        0       2" >> /etc/fstab' % ( devicemap[voldevice]['local'], srvid, volkey ), shell=True)
+
+      sys.stdout.write('%s: volume: %s: fstab updated\n' % ( srvid, volkey ))
+
+    if 'mounts' in volval:
+      for subval in volval['mounts']:
+        if not os.path.exists('/mnt/docker-scs--%s--%s/%s' % ( srvid, volkey, subval )):
+          os.mkdir('/mnt/docker-scs--%s--%s/%s' % ( srvid, volkey, subval ), 0700)
+
+        dockerrun = '%s -v /mnt/docker-scs--%s--%s/%s:/scs/mnt/%s' % ( dockerrun, srvid, volkey, subval, subval )
+    else:
+      dockerrun = '%s -v /mnt/docker-scs--%s--%s:/scs/mnt/%s' % ( dockerrun, srvid, volkey, volkey )
+
+  if subprocess.call([ 'docker', 'inspect', 'scs--%s--base' % srvid ], stdout=DEVNULL, stderr=DEVNULL):
+    sys.stdout.write('%s: docker: creating base container...' % srvid)
+
+    subprocess.check_call('/usr/bin/docker build -t scs--%s--base .' % srvid, shell=True)
+
+    sys.stdout.write('%s: docker: created base container' % srvid)
+
+  if subprocess.call([ 'docker', 'inspect', 'scs--%s' % srvid ], stdout=DEVNULL, stderr=DEVNULL):
+    sys.stdout.write('%s: docker: creating container...' % srvid)
+
+    subprocess.check_call('%s scs--%s--base "%s"' % ( dockerrun, srvid, srvval['puppet'] ), shell=True)
+
+    sys.stdout.write('%s: docker: created container' % srvid)
+
+    sys.stdout.write('%s: docker: committing image...' % srvid)
+
+    subprocess.check_call("docker commit $(docker ps -l -notrunc -a | tail -n1 | awk '{ print $1 }') scs--%s" % ( srvid ), shell=True)
+
+    sys.stdout.write('%s: docker: committed image' % srvid)
+
+  open('/etc/supervisord.d/docker--scs--%s.conf' % srvid, 'w').write('[program:docker--scs--%s]\ncommand = %s scs--%s /scs/scs/bin/run\nautorestart = true\nstdout_logfile = /var/log/supervisord/%%(program_name)s-stdout.log\nstderr_logfile = /var/log/supervisord/%%(program_name)s-stderr.log\n' % ( srvid, dockerrun, srvid ))
+
+  sys.stdout.write('\n')
+
+sys.stdout.write('updating supervisord...\n')
+
+subprocess.call([ 'supervisorctl', '-c', '/etc/supervisor.conf', 'update' ])
+
+sys.stdout.write('updated supervisord\n')
+
+closeout()
