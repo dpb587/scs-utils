@@ -1,5 +1,6 @@
 Assuming AWS and Ubuntu 13.10, it goes something like this...
 
+    pip install -r requirements.txt
     ./bin/deploy-service-set --env dev dpb587-blog-test1 https://www.example.com/dpb587-blog-test1/manifest.yaml
 
 `manifest.yaml`:

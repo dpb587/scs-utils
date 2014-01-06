@@ -188,8 +188,6 @@ for srvkey in config['services']:
           'Name' : '%s/%s' % ( srvkey, volkey ),
         })
 
-        sys.stdout.write('%s: volume: %s: %s\n' % ( srvid, volkey, volume.id ))
-
         while True:
           statuscheck = ec2.get_all_volumes(volume.id).pop()
 
@@ -197,9 +195,8 @@ for srvkey in config['services']:
             break
 
           time.sleep(2)
-          sys.stdout.write('.')
 
-        sys.stdout.write('%s: volume: %s: created\n' % ( srvid, volkey ))
+        sys.stdout.write('%s: volume: %s: created %s\n' % ( srvid, volkey, volume.id ))
 
       else:
         volume = availablevols.pop()
@@ -219,7 +216,7 @@ for srvkey in config['services']:
 
       pstate['services'][srvid]['volumes'][volkey] = voldevice
 
-      sys.stdout.write('%s: volume: %s: physically mounting...\n' % ( srvid, volkey ))
+      sys.stdout.write('%s: volume: %s: physically mounting %s to %s...\n' % ( srvid, volkey, volume.id, voldevice ))
 
       ec2.attach_volume(volume.id, ec2instance['instanceId'], voldevice)
 
@@ -232,7 +229,12 @@ for srvkey in config['services']:
           break
 
         time.sleep(2)
-        sys.stdout.write('.')
+
+      while True:
+        if 0 == subprocess.call('/sbin/fdisk -l %s | /bin/grep "%s"' % ( devicemap[voldevice]['local'], devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
+          break
+
+        time.sleep(2)
 
       sys.stdout.write('%s: volume: %s: physically mounted\n' % ( srvid, volkey ))
 
@@ -240,14 +242,14 @@ for srvkey in config['services']:
       os.mkdir('/mnt/docker-scs--%s--%s' % ( srvid, volkey ))
 
     if subprocess.call('/sbin/dumpe2fs %s' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-      sys.stdout.write('%s: volume: %s: formatting...\n' % ( srvid, volkey ))
+      sys.stdout.write('%s: volume: %s: formatting %s...\n' % ( srvid, volkey, devicemap[voldevice]['local'] ))
 
       subprocess.check_call('/sbin/mkfs.%s %s' % ( volval['format'], devicemap[voldevice]['local'] ), shell=True)
 
       sys.stdout.write('%s: volume: %s: formatted\n' % ( srvid, volkey ))
 
     if subprocess.call('/bin/cat /proc/mounts | /bin/grep %s' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-      sys.stdout.write('%s: volume: %s: logically mounting...\n' % ( srvid, volkey ))
+      sys.stdout.write('%s: volume: %s: logically mounting %s...\n' % ( srvid, volkey, devicemap[voldevice]['local'] ))
 
       subprocess.check_call('/bin/mount %s /mnt/docker-scs--%s--%s' % ( devicemap[voldevice]['local'], srvid, volkey ), shell=True)
 
@@ -268,24 +270,24 @@ for srvkey in config['services']:
       dockerrun = '%s -v /mnt/docker-scs--%s--%s:/scs/mnt/%s' % ( dockerrun, srvid, volkey, volkey )
 
   if subprocess.call([ 'docker', 'inspect', 'scs--%s--base' % srvid ], stdout=DEVNULL, stderr=DEVNULL):
-    sys.stdout.write('%s: docker: creating base container...' % srvid)
+    sys.stdout.write('%s: docker: creating base container...\n' % srvid)
 
     subprocess.check_call('/usr/bin/docker build -t scs--%s--base .' % srvid, shell=True)
 
-    sys.stdout.write('%s: docker: created base container' % srvid)
+    sys.stdout.write('%s: docker: created base container\n' % srvid)
 
   if subprocess.call([ 'docker', 'inspect', 'scs--%s' % srvid ], stdout=DEVNULL, stderr=DEVNULL):
-    sys.stdout.write('%s: docker: creating container...' % srvid)
+    sys.stdout.write('%s: docker: creating container...\n' % srvid)
 
     subprocess.check_call('%s scs--%s--base "%s"' % ( dockerrun, srvid, srvval['puppet'] ), shell=True)
 
-    sys.stdout.write('%s: docker: created container' % srvid)
+    sys.stdout.write('%s: docker: created container\n' % srvid)
 
-    sys.stdout.write('%s: docker: committing image...' % srvid)
+    sys.stdout.write('%s: docker: committing image...\n' % srvid)
 
     subprocess.check_call("docker commit $(docker ps -l -notrunc -a | tail -n1 | awk '{ print $1 }') scs--%s" % ( srvid ), shell=True)
 
-    sys.stdout.write('%s: docker: committed image' % srvid)
+    sys.stdout.write('%s: docker: committed image\n' % srvid)
 
   open('/etc/supervisord.d/docker--scs--%s.conf' % srvid, 'w').write('[program:docker--scs--%s]\ncommand = %s scs--%s /scs/scs/bin/run\nautorestart = true\nstdout_logfile = /var/log/supervisord/%%(program_name)s-stdout.log\nstderr_logfile = /var/log/supervisord/%%(program_name)s-stderr.log\n' % ( srvid, dockerrun, srvid ))
 
