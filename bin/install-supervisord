@@ -2,7 +2,7 @@
 
 set -e
 
-apt-get install -y python-pip python-setuptools
+apt-get install -y python-setuptools
 easy_install supervisor
 mkdir -p /var/{log,run}/supervisord
 mkdir -p /etc/supervisord.d
