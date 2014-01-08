@@ -334,11 +334,17 @@ for srvkey in config['services']:
     prepped = True
 
   if False != s3cachebucket and (False == prepped or None == s3cachedkey):
+    sys.stdout.write('%s: docker: saving image...\n' % srvid)
+
+    subprocess.call([ 'docker', 'save', 'scs--%s--%s' % ( srvid, srvuid ) ], stdout=open('/var/lib/scs-docker/tmp/scs--%s--%s.tar' % ( srvid, srvuid ), 'w'))
+
+    sys.stdout.write('%s: docker: saved image\n' % srvid)
+
     s3cachedkey = s3cachebucket.new_key('scs--%s--%s.tar' % ( srvid, srvuid ))
 
     sys.stdout.write('%s: docker: uploading image...\n' % srvid)
 
-    s3cachedkey.set_contents_from_file(open('/var/lib/scs-docker/tmp/%s--base.tar' % srvid, 'r'))
+    s3cachedkey.set_contents_from_file(open('/var/lib/scs-docker/tmp/scs--%s--%s.tar' % ( srvid, srvuid ), 'r'))
 
     sys.stdout.write('%s: docker: uploaded image\n' % srvid)
 
