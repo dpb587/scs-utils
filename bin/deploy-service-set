@@ -17,6 +17,7 @@ DEVNULL = open(os.devnull, 'w')
 
 cli = argparse.ArgumentParser(description='Deploy a docker service.')
 cli.add_argument('--env', help='Environment (e.g. dev, prod)')
+cli.add_argument('--docker-s3-cache', help='S3 bucket for caching docker images')
 cli.add_argument('name', help='Service name for the application.')
 cli.add_argument('path', help='File or URL configuration path for the docker.')
 cli.set_defaults(env='dev')
@@ -27,6 +28,8 @@ if not os.path.exists('/var/lib/scs-docker'):
   os.mkdir('/var/lib/scs-docker', 0700)
 if not os.path.exists('/var/lib/scs-docker/source'):
   os.mkdir('/var/lib/scs-docker/source', 0700)
+if not os.path.exists('/var/lib/scs-docker/tmp'):
+  os.mkdir('/var/lib/scs-docker/tmp', 0700)
 
 if os.path.exists('/var/lib/scs-docker/pstate.json'):
   pstate = simplejson.load(open('/var/lib/scs-docker/pstate.json', 'r'))
@@ -97,6 +100,12 @@ devicemap = {
 # basics
 
 ec2 = boto.ec2.connect_to_region(ec2instance['region'])
+s3api = boto.connect_s3()
+
+if cliargs.docker_s3_cache:
+  s3cachebucket = s3api.get_bucket(cliargs.docker_s3_cache)
+else:
+  s3cachebucket = False
 
 sys.stdout.write('whoami: instance-id: %s\n' % ec2instance['instanceId'])
 sys.stdout.write('whoami: region: %s\n' % ec2instance['region'])
@@ -128,6 +137,8 @@ for srvkey in config['services']:
       'volumes' : {}
     }
 
+  sourceid = False
+
   if 'git' in srvval['source']:
     ref = 'master'
 
@@ -148,6 +159,9 @@ for srvkey in config['services']:
 
     subprocess.check_call([ 'git', 'reset', '--hard' ], stdout=DEVNULL, stderr=DEVNULL)
     subprocess.check_call([ 'git', 'checkout', ref ], stdout=DEVNULL, stderr=DEVNULL)
+
+    proc = subprocess.Popen('git rev-parse HEAD', shell=True, stdout=subprocess.PIPE)
+    sourceid = proc.stdout.read()
 
   for portmap in srvval['ports']:
     dockerrun = "%s -p %s:%s" % ( dockerrun, portmap[0], portmap[1] )
@@ -269,29 +283,66 @@ for srvkey in config['services']:
     else:
       dockerrun = '%s -v /mnt/docker-scs--%s--%s:/scs/mnt/%s' % ( dockerrun, srvid, volkey, volkey )
 
-  if subprocess.call([ 'docker', 'inspect', 'scs--%s--base' % srvid ], stdout=DEVNULL, stderr=DEVNULL):
-    sys.stdout.write('%s: docker: creating base container...\n' % srvid)
+  #
+  # base image
+  #
 
-    subprocess.check_call('/usr/bin/docker build -t scs--%s--base .' % srvid, shell=True)
+  srvuid = hashlib.md5('%s:%s:%s' % ( srvkey, hashlib.md5(yaml.dump(srvval)).hexdigest(), sourceid )).hexdigest()
 
-    sys.stdout.write('%s: docker: created base container\n' % srvid)
+  if False != s3cachebucket:
+    s3cachedkey = s3cachebucket.get_key('scs--%s--%s.tar' % ( srvid, srvuid ))
+  else:
+    s3cachedkey = False
 
-  if subprocess.call([ 'docker', 'inspect', 'scs--%s' % srvid ], stdout=DEVNULL, stderr=DEVNULL):
-    sys.stdout.write('%s: docker: creating container...\n' % srvid)
+  prepped = False
 
-    subprocess.check_call('%s scs--%s--base "%s"' % ( dockerrun, srvid, srvval['puppet'] ), shell=True)
+  if subprocess.call([ 'docker', 'inspect', 'scs--%s--%s' % ( srvid, srvuid ) ], stdout=DEVNULL, stderr=DEVNULL):
+    if False != s3cachebucket and None != s3cachedkey:
+        sys.stdout.write('%s: docker: downloading image...\n' % srvid)
 
-    sys.stdout.write('%s: docker: created container\n' % srvid)
+        s3cachedkey.get_contents_to_filename('/var/lib/scs-docker/tmp/scs--%s--%s.tar' % ( srvid, srvuid ))
 
-    sys.stdout.write('%s: docker: committing image...\n' % srvid)
+        sys.stdout.write('%s: docker: downloaded image\n' % srvid)
 
-    subprocess.check_call("docker commit $(docker ps -l -notrunc -a | tail -n1 | awk '{ print $1 }') scs--%s" % ( srvid ), shell=True)
+        sys.stdout.write('%s: docker: loading image...\n' % srvid)
 
-    sys.stdout.write('%s: docker: committed image\n' % srvid)
+        subprocess.call([ 'docker', 'load' ], stdin=open('/var/lib/scs-docker/tmp/scs--%s--%s.tar' % ( srvid, srvuid ), 'r'))
 
-  open('/etc/supervisord.d/docker--scs--%s.conf' % srvid, 'w').write('[program:docker--scs--%s]\ncommand = %s scs--%s /scs/scs/bin/run\nautorestart = true\nstdout_logfile = /var/log/supervisord/%%(program_name)s-stdout.log\nstderr_logfile = /var/log/supervisord/%%(program_name)s-stderr.log\n' % ( srvid, dockerrun, srvid ))
+        sys.stdout.write('%s: docker: loaded image\n' % srvid)
 
-  sys.stdout.write('\n')
+        prepped = True
+
+    if False == prepped:
+      sys.stdout.write('%s: docker: creating base image...\n' % srvid)
+
+      subprocess.check_call('/usr/bin/docker build -t scs--%s--%s--base .' % ( srvid, srvuid ), shell=True)
+
+      sys.stdout.write('%s: docker: created base image\n' % srvid)
+
+      sys.stdout.write('%s: docker: creating container...\n' % srvid)
+
+      subprocess.check_call('%s scs--%s--%s--base "%s"' % ( dockerrun, srvid, srvuid, srvval['puppet'] ), shell=True)
+
+      sys.stdout.write('%s: docker: created container\n' % srvid)
+
+      sys.stdout.write('%s: docker: committing image...\n' % srvid)
+
+      subprocess.check_call("docker commit $(docker ps -l -notrunc -a | tail -n1 | awk '{ print $1 }') scs--%s--%s" % ( srvid, srvuid ), shell=True)
+
+      sys.stdout.write('%s: docker: committed image\n' % srvid)
+  else:
+    prepped = True
+
+  if False != s3cachebucket and (False == prepped or None == s3cachedkey):
+    s3cachedkey = s3cachebucket.new_key('scs--%s--%s.tar' % ( srvid, srvuid ))
+
+    sys.stdout.write('%s: docker: uploading image...\n' % srvid)
+
+    s3cachedkey.set_contents_from_file(open('/var/lib/scs-docker/tmp/%s--base.tar' % srvid, 'r'))
+
+    sys.stdout.write('%s: docker: uploaded image\n' % srvid)
+
+  open('/etc/supervisord.d/docker--scs--%s.conf' % srvid, 'w').write('[program:docker--scs--%s]\ncommand = %s scs--%s--%s /scs/scs/bin/run\nautorestart = true\nstdout_logfile = /var/log/supervisord/%%(program_name)s-stdout.log\nstderr_logfile = /var/log/supervisord/%%(program_name)s-stderr.log\n' % ( srvid, dockerrun, srvid, srvuid ))
 
 sys.stdout.write('updating supervisord...\n')
 
