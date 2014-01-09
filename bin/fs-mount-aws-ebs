@@ -114,7 +114,7 @@ if False == mounted:
       dargs['iops'] = cliargs.aws_ebs_iops
     if None != cliargs.aws_ebs_size:
       dargs['size'] = cliargs.aws_ebs_size
-    if None != cliargs.aws_ebs_snapshot_id:
+    if None != cliargs.aws_ebs_snapshot_id and 'snap-00000000' != cliargs.aws_ebs_snapshot_id:
       dargs['snapshot'] = cliargs.aws_ebs_snapshot_id
     if None != cliargs.aws_ebs_type:
       dargs['volume_type'] = cliargs.aws_ebs_type
