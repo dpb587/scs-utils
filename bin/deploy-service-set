@@ -12,6 +12,7 @@ import time
 import urllib2
 import yaml
 
+myrelpath = os.path.dirname(os.path.abspath(__file__))
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 DEVNULL = open(os.devnull, 'w')
 
@@ -170,109 +171,27 @@ for srvkey in config['services']:
     volval = srvval['volumes'][volkey] 
 
     voldevice = False
-    mounted = False
 
     if volkey in pstate['services'][srvid]['volumes']:
       voldevice = pstate['services'][srvid]['volumes'][volkey]
 
-    if False != voldevice:
-      if 0 == subprocess.call('/sbin/fdisk -l %s | /bin/grep "%s"' % ( devicemap[voldevice]['local'], devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-        mounted = True
+    if False == voldevice:  
+      for key in devicemap:
+        if devicemap[key]['usable']:
+          voldevice = key
 
-
-    if False == mounted:
-      availablevols = ec2.get_all_volumes(filters = {
-        'status' : 'available',
-        'tag:Environment' : cliargs.env,
-        'tag:Service' : cliargs.name,
-        'tag:Name' : '%s/%s' % (srvkey, volkey )
-      })
-
-      if 0 == len(availablevols):
-        sys.stdout.write('%s: volume: %s: creating...\n' % ( srvid, volkey ))
-
-        args = volval['creation']
-        args['zone'] = ec2instance['availabilityZone'].encode('ascii')
-
-        volume = ec2.create_volume(**args)
-
-        ec2.create_tags(volume.id, {
-          'Environment' : cliargs.env,
-          'Service' : cliargs.name,
-          'Name' : '%s/%s' % ( srvkey, volkey ),
-        })
-
-        while True:
-          statuscheck = ec2.get_all_volumes(volume.id).pop()
-
-          if 'available' == statuscheck.status:
-            break
-
-          time.sleep(2)
-
-        sys.stdout.write('%s: volume: %s: created %s\n' % ( srvid, volkey, volume.id ))
-
-      else:
-        volume = availablevols.pop()
+          break
 
       if False == voldevice:
-        for key in devicemap:
-          if devicemap[key]['usable']:
-            voldevice = key
+        raise RuntimeError('No devices are available.')
 
-            break
+    subprocess.check_call(
+      '%s/fs-mount-aws-ebs -vvv --fstab --mkfs-type "%s" --aws-ebs-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
+        ( myrelpath, volval['format'], volval['creation']['size'], cliargs.env, cliargs.name, '%s/%s' % (srvkey, volkey), devicemap[voldevice]['local'], '/mnt/docker-scs--%s--%s' % ( srvid, volkey ) )
+      , shell=True
+    )
 
-        if False == voldevice:
-          raise RuntimeError('No devices are available.')
-
-      devicemap[voldevice]['usable'] = False
-      devicemap[voldevice]['volume_id'] = volume.id
-
-      pstate['services'][srvid]['volumes'][volkey] = voldevice
-
-      sys.stdout.write('%s: volume: %s: physically mounting %s to %s...\n' % ( srvid, volkey, volume.id, voldevice ))
-
-      ec2.attach_volume(volume.id, ec2instance['instanceId'], voldevice)
-
-      pstate['services'][srvid]['volumes'][volkey] = voldevice
-
-      while True:
-        statuscheck = ec2.get_all_volumes(volume.id).pop()
-
-        if 'in-use' == statuscheck.status:
-          break
-
-        time.sleep(2)
-
-      while True:
-        if 0 == subprocess.call('/sbin/fdisk -l %s | /bin/grep "%s"' % ( devicemap[voldevice]['local'], devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-          break
-
-        time.sleep(2)
-
-      sys.stdout.write('%s: volume: %s: physically mounted\n' % ( srvid, volkey ))
-
-    if not os.path.exists('/mnt/docker-scs--%s--%s' % ( srvid, volkey )):
-      os.mkdir('/mnt/docker-scs--%s--%s' % ( srvid, volkey ))
-
-    if subprocess.call('/sbin/dumpe2fs %s' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-      sys.stdout.write('%s: volume: %s: formatting %s...\n' % ( srvid, volkey, devicemap[voldevice]['local'] ))
-
-      subprocess.check_call('/sbin/mkfs.%s %s' % ( volval['format'], devicemap[voldevice]['local'] ), shell=True)
-
-      sys.stdout.write('%s: volume: %s: formatted\n' % ( srvid, volkey ))
-
-    if subprocess.call('/bin/cat /proc/mounts | /bin/grep %s' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-      sys.stdout.write('%s: volume: %s: logically mounting %s...\n' % ( srvid, volkey, devicemap[voldevice]['local'] ))
-
-      subprocess.check_call('/bin/mount %s /mnt/docker-scs--%s--%s' % ( devicemap[voldevice]['local'], srvid, volkey ), shell=True)
-
-      sys.stdout.write('%s: volume: %s: logically mounted\n' % ( srvid, volkey ))
-
-    if subprocess.call('/bin/grep %s /etc/fstab' % ( devicemap[voldevice]['local'] ), stdout=DEVNULL, stderr=DEVNULL, shell=True):
-      subprocess.check_call('/bin/echo "%s       /mnt/docker-scs--%s--%s   ext4    defaults        0       2" >> /etc/fstab' % ( devicemap[voldevice]['local'], srvid, volkey ), shell=True)
-
-      sys.stdout.write('%s: volume: %s: fstab updated\n' % ( srvid, volkey ))
+    devicemap[voldevice]['usable'] = False
 
     if 'mounts' in volval:
       for subval in volval['mounts']:
@@ -321,7 +240,7 @@ for srvkey in config['services']:
 
       sys.stdout.write('%s: docker: creating container...\n' % srvid)
 
-      subprocess.check_call('%s scs--%s--%s--base "%s"' % ( dockerrun, srvid, srvuid, srvval['puppet'] ), shell=True)
+      subprocess.check_call('%s scs--%s--%s--base "%s" "/scs/scs/bin/cleanup"' % ( dockerrun, srvid, srvuid, srvval['puppet'] ), shell=True)
 
       sys.stdout.write('%s: docker: created container\n' % srvid)
 
