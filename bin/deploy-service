@@ -1,0 +1,366 @@
+#!/usr/bin/env python
+
+import argparse
+import boto.ec2
+import datetime
+import hashlib
+import os
+import simplejson
+import string
+import subprocess
+import sys
+import time
+import urllib2
+import yaml
+
+cli = argparse.ArgumentParser(description='Utility for building, caching, and compiling scs-based docker images. This command is idempotent.')
+cli.add_argument('envname', help='Environment usage for (e.g. dev, prod, test)')
+cli.add_argument('servicename', help='Service usage (e.g. tle-www-blog)')
+cli.add_argument('rolename', help='Role usage (e.g. mysql/data)')
+cli.add_argument('manifest', help='Path for configuration (e.g. https://example.com/e15d6fe49a6419931ddd4e7d9070b972403a1fe9.yaml)')
+cli.add_argument('--cache-s3-bucket', help='An S3 bucket for caching built images', metavar='BUCKET')
+cli.add_argument('--cache-s3-prefix', help='An optional prefix to use when caching built images to S3', metavar='PREFIX', default='')
+cli.add_argument('--state', help='A JSON file path for storing persistent configuration (e.g. /var/lib/scs-docker-utils/state.json)', metavar='PATH')
+cli.add_argument('--supervisor', help='Add and update supervisor entries', action='store_true')
+cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+
+cliargs = cli.parse_args()
+
+#
+# setup our basics
+#
+
+DEVNULL = open(os.devnull, 'w')
+
+if cliargs.verbose > 2:
+  TASK_STDOUT = None
+  TASK_STDERR = None
+else:
+  TASK_STDOUT = DEVNULL
+  TASK_STDERR = DEVNULL
+
+pstate = {}
+
+def excepthook(type, value, traceback):
+  writepstate()
+  sys.__excepthook__(type, value, traceback)
+
+
+def writepstate():
+  simplejson.dump(pstate, open(cliargs.state, 'w'))
+
+
+ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+s3api = boto.connect_s3()
+
+
+#
+# ready, set, go...
+#
+
+if cliargs.cache_s3_bucket:
+  s3cache = s3api.get_bucket(cliargs.cache_s3_bucket)
+else:
+  s3cache = False
+
+
+if cliargs.state:
+  if os.path.exists(cliargs.state):
+    pstate = simplejson.load(open(cliargs.state, 'r'))
+
+  sys.excepthook = writepstate
+
+if 'services' not in pstate:
+  pstate['services'] = {}
+
+pstate['lastrun'] = datetime.datetime.now().isoformat()
+
+
+#
+# load configuration
+#
+
+config_raw = urllib2.urlopen(cliargs.manifest).read()
+config = yaml.safe_load(config_raw)
+dockerrun = '/usr/bin/docker run -t -i'
+
+#
+# check available volumes, if necessary
+#
+
+devicemap = {
+  '/dev/sdf' : '/dev/xvdf',
+  '/dev/sdg' : '/dev/xvdg',
+  '/dev/sdh' : '/dev/xvdh',
+  '/dev/sdi' : '/dev/xvdi',
+  '/dev/sdj' : '/dev/xvdj',
+  '/dev/sdk' : '/dev/xvdk',
+  '/dev/sdl' : '/dev/xvdl',
+  '/dev/sdm' : '/dev/xvdm',
+  '/dev/sdn' : '/dev/xvdn',
+  '/dev/sdo' : '/dev/xvdo',
+  '/dev/sdp' : '/dev/xvdp',
+}
+
+if 'volumes' in config:
+  volumes = ec2api.get_all_volumes(filters = { 'attachment.instance-id' : ec2instance['instanceId'] })
+
+  for volume in volumes:
+    if volume.attach_data.device in devicemap:
+      del devicemap[volume.attach_data.device]
+
+#
+# download source
+#
+
+if 'git' in config['source']:
+  #
+  # cloning
+  #
+
+  srcpath = '/tmp/scs-git-%s' % hashlib.md5('%s' % config['source']['git']).hexdigest()
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('cloning repository...\n')
+
+  subprocess.check_call([ 'git', 'clone', config['source']['git'], srcpath ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('cloned repository\n')
+
+  os.chdir(srcpath)
+
+  #
+  # commit-ish
+  #
+
+  niceref = 'master'
+
+  if 'ref' in config['source']:
+    niceref = config['source']
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('checking out referencee...\n')
+
+  subprocess.check_call([ 'git', 'checkout', niceref ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
+
+  sys.stdout.write('checked out reference\n')
+
+  proc = subprocess.Popen('git rev-parse HEAD', shell=True, stdout=subprocess.PIPE)
+  realref = proc.stdout.read()
+else:
+  raise RuntimeError('Unexpected source type')
+
+
+sid = hashlib.md5('%s\n%s' % ( realref, config_raw )).hexdigest()
+rid = '%s--%s--%s' % ( cliargs.envname, cliargs.servicename, cliargs.rolename )
+uid = '%s--%s' % ( rid, sid )
+
+if rid not in pstate['services']:
+  pstate['services'][rid] = {}
+if 'volumes' not in pstate['services'][rid]:
+  pstate['services'][rid]['volumes'] = {}
+
+for portmap in config['ports']:
+  dockerrun = "%s -p %s:%s" % ( dockerrun, portmap[0], portmap[1] )
+
+
+#
+# handle volume mounts
+#
+
+for volkey in config['volumes']:
+  volval = config['volumes'][volkey] 
+
+  voldevice = False
+
+  # see if we're already supposed to use a volume
+  if volkey in pstate['services'][rid]['volumes']:
+    voldevice = pstate['services'][rid]['volumes'][volkey]
+
+  if False == voldevice:
+    # there's apparently not one; find one
+
+    for key in devicemap:
+      voldevice = devicemap[key]
+      del devicemap[key]
+
+      break
+
+    if False == voldevice:
+      raise RuntimeError('No devices are available.')
+
+  subprocess.check_call(
+    'fs-mount-aws-ebs -vvv --fstab --mkfs-type "%s" --aws-ebs-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
+      (
+        volval['format'],
+        volval['creation']['size'],
+        cliargs.envname,
+        cliargs.servicename,
+        '%s/%s' % ( cliargs.rolename, volkey ),
+        voldevice,
+        '/mnt/docker-scs--%s--%s' % ( rid, volkey )
+      )
+      ,
+    shell=True
+  )
+
+  # store this for later
+  pstate['services'][rid]['volumes'][volkey] = voldevice
+
+  if 'mounts' in volval:
+    for subval in volval['mounts']:
+      if not os.path.exists('/mnt/docker-scs--%s--%s/%s' % ( rid, volkey, subval )):
+        os.mkdir('/mnt/docker-scs--%s--%s/%s' % ( rid, volkey, subval ), 0700)
+
+      dockerrun = '%s -v /mnt/docker-scs--%s--%s/%s:/scs/mnt/%s' % ( dockerrun, rid, volkey, subval, subval )
+  else:
+    dockerrun = '%s -v /mnt/docker-scs--%s--%s:/scs/mnt/%s' % ( dockerrun, rid, volkey, volkey )
+
+
+#
+# build base image
+#
+
+
+if False != s3cache:
+  cachekey = s3cache.get_key('%sscs-%s.tar' % ( cliargs.cache_s3_prefix, uid ))
+else:
+  cachekey = False
+
+prepped = False
+
+if subprocess.call([ 'docker', 'inspect', 'scs--%s' % uid ], stdout=DEVNULL, stderr=DEVNULL):
+  if False != s3cache and None != cachekey:
+    if cliargs.verbose > 1:
+      sys.stdout.write('downloading cached image...\n')
+
+    cachekey.get_contents_to_filename('/tmp/scs--%s.tar' % uid)
+
+    if cliargs.verbose > 0:
+      sys.stdout.write('downloaded cached images\n')
+
+
+    if cliargs.verbose > 1:
+      sys.stdout.write('importing cached image...\n')
+
+    subprocess.call([ 'docker', 'load' ], stdin=open('/tmp/scs--%s.tar' % uid, 'r'), stdout=TASK_STDOUT, stderr=TASK_STDERR)
+
+    if cliargs.verbose > 0:
+      sys.stdout.write('imported cached image\n')
+
+    prepped = True
+
+  if False == prepped:
+    if cliargs.verbose > 1:
+      sys.stdout.write('creating base image...\n')
+
+    subprocess.check_call(
+      '/usr/bin/docker build -t scs--%s--base .' % uid,
+      stdout=TASK_STDOUT,
+      stderr=TASK_STDERR,
+      shell=True
+    )
+
+    if cliargs.verbose > 0:
+      sys.stdout.write('created base image\n')
+
+
+    if cliargs.verbose > 1:
+      sys.stdout.write('creating container...\n')
+
+    puppetarg = config['puppet']
+    dockerruntmp = ""
+
+    if len(string.split(puppetarg, "\n")) > 1:
+      # treat as a temporary file for injection
+      os.mkdir('/tmp/scs-%s-puppet' % uid, 0700)
+      f = open('/tmp/scs-%s-puppet/puppet.pp' % uid, 'w')
+      f.write(puppetarg)
+      f.close()
+
+      puppetarg = '/tmp/hostmount/puppet.pp'
+      dockerruntmp = "-v /tmp/scs-%s-puppet:/tmp/hostmount" % uid
+
+    subprocess.check_call(
+      '%s %s scs--%s--base "%s" "/scs/scs/bin/cleanup"'
+        % (
+          dockerrun,
+          dockerruntmp,
+          uid,
+          puppetarg
+        )
+      ,
+      stdout=TASK_STDOUT,
+      stderr=TASK_STDERR,
+      shell=True
+    )
+
+    if cliargs.verbose > 0:
+      sys.stdout.write('created container\n')
+
+
+    if cliargs.verbose > 1:
+      sys.stdout.write('committing image...\n')
+
+    subprocess.check_call(
+      "docker commit $(docker ps -l -notrunc -a | tail -n1 | awk '{ print $1 }') scs--%s" % uid,
+      stdout=TASK_STDOUT,
+      stderr=TASK_STDERR,
+      shell=True
+    )
+
+    if cliargs.verbose > 0:
+      sys.stdout.write('committed image\n')
+
+else:
+  prepped = True
+
+if False != s3cache and (False == prepped or None == cachekey):
+  # cache a new or non-existant image
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('exporting cache image...\n')
+
+  subprocess.call(
+    [ 'docker', 'save', 'scs--%s' % uid ],
+    stdout=open('/tmp/scs--%s.tar' % uid, 'w'),
+    stderr=TASK_STDERR
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('exported cache image\n')
+
+
+  cachekey = s3cache.new_key('%sscs-%s.tar' % ( cliargs.cache_s3_prefix, uid ))
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('uploading cache image...\n')
+
+  cachekey.set_contents_from_file(open('/tmp/scs--%s.tar' % uid, 'r'))
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('uploaded cache image\n')
+
+#
+# supervisor update
+#
+
+if cliargs.supervisor:
+  open('/etc/supervisord.d/docker--scs--%s.conf' % rid, 'w').write('[program:docker--scs--%s]\ncommand = %s scs--%s /scs/scs/bin/run\nautorestart = true\nstdout_logfile = /var/log/supervisord/%%(program_name)s-stdout.log\nstderr_logfile = /var/log/supervisord/%%(program_name)s-stderr.log\n' % ( rid, dockerrun, uid ))
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('updating supervisord...\n')
+
+  subprocess.call(
+    [ 'supervisorctl', '-c', '/etc/supervisor.conf', 'update' ],
+    stdout=TASK_STDOUT,
+    stderr=TASK_STDERR
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('updated supervisord\n')
+
+
+writepstate()
