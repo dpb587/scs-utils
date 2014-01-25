@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+
+import argparse
+import boto.ec2
+import os
+import simplejson
+import subprocess
+import sys
+import time
+import urllib2
+
+cli = argparse.ArgumentParser(description='Utility for attaching an ENI to localhost. This command is idempotent.')
+cli.add_argument('eni', help='Elastic Network Interface ID to attach')
+cli.add_argument('device', help='Local device index', type=int, default=1)
+cli.add_argument('--default-route', help='Adjust routing tables with a new default gateway', metavar='IP')
+cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+
+cliargs = cli.parse_args()
+
+#
+# setup our basics
+#
+
+DEVNULL = open(os.devnull, 'w')
+
+if cliargs.verbose > 2:
+  TASK_STDOUT = None
+  TASK_STDERR = None
+else:
+  TASK_STDOUT = DEVNULL
+  TASK_STDERR = DEVNULL
+
+ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+
+#
+# validate our arguments
+#
+
+eni = ec2api.get_all_network_interfaces(filters = {
+  'network-interface-id' : cliargs.eni,
+}).pop()
+
+#
+# verify we can/should attach the network interface
+#
+
+attached = False
+
+if eni.attachment:
+  if eni.attachment.instance_id.encode('ascii') != ec2instance['instanceId']:
+    raise RuntimeError('ENI "%s" is already attached to instance "%s".' % ( cliargs.eni, eni.attachment.instance_id ))
+  if eni.attachment.device_index != cliargs.device:
+    raise RuntimeError('ENI "%s" is already attached to device "%s".' % ( cliargs.eni, eni.attachment.device_index ))
+
+  attached = True
+
+
+if False == attached:
+  if cliargs.verbose > 1:
+    sys.stdout.write('attaching interface...\n')
+
+  ec2api.attach_network_interface(cliargs.eni, ec2instance['instanceId'], cliargs.device)
+
+  while True:
+    statuscheck = ec2api.get_all_network_interfaces(filters = {
+      'network-interface-id' : cliargs.eni,
+    }).pop()
+
+    if 'in-use' == statuscheck.status:
+      break
+
+    time.sleep(2)
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('attached interface\n')
+
+#
+# update network configuration
+#
+
+configured = True
+
+if 0 != subprocess.call('/bin/grep "auth eth%s" /etc/network/interfaces' % ( cliargs.device ), shell=True, stdout=DEVNULL, stderr=DEVNULL):
+  configured = False
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('updating network configuration...\n')
+
+  subprocess.check_call(
+    '( /bin/echo "# aws eni-%s" ; /bin/echo "auto eth%s" ; /bin/echo "iface eth%s inet dhcp") >> /etc/network/interfaces' % ( cliargs.eni, cliargs.device, cliargs.device ),
+    shell=True,
+    stdout=DEVNULL,
+    stderr=DEVNULL
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('updated network configuration\n')
+
+#
+# restart networking services
+#
+
+if False == configured:
+  if cliargs.verbose > 1:
+    sys.stdout.write('restarting network services...\n')
+
+  subprocess.check_call(
+    'service networking restart',
+    shell=True,
+    stdout=DEVNULL,
+    stderr=DEVNULL
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('restarted network services\n')
+
+#
+# update routing
+#
+
+if cliargs.default_route:
+  if cliargs.verbose > 1:
+    sys.stdout.write('updating routing table...\n')
+
+    subprocess.check_call(
+      'route del default && route add -net default netmask 0.0.0.0 gw %s' % ( cliargs.default_route ),
+      shell=True,
+      stdout=DEVNULL,
+      stderr=DEVNULL
+    )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('updated routing table\n')

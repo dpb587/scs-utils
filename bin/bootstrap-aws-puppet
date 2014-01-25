@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# args: region stack resource setup-script
+
+set -e
+
+# puppet
+wget https://apt.puppetlabs.com/puppetlabs-release-raring.deb
+dpkg -i puppetlabs-release-raring.deb
+rm puppetlabs-release-raring.deb
+apt-get update
+
+# core tools
+apt-get -y install git puppet python-pip
+
+# scs-utils
+mkdir /usr/local/scs-utils
+pushd /usr/local/scs-utils
+wget -O- https://github.com/dpb587/scs-docker-utils/archive/master.tar.gz | tar -xz --strip-components 1
+pip install --upgrade -r requirements.txt
+ln -s bin/* /usr/bin/
+popd
+
+# cfn-bootstrap
+pip install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+cfn-init --verbose --region "$1" --stack "$2" --resource "$3"
+
+# optional custom script
+if [ "" != $4 ]; then
+    $4
+fi
+
+# puppet
+sed -i 's/START=no/START=yes/' /etc/default/puppet
+service puppet start

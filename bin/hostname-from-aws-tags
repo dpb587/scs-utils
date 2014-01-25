@@ -1,0 +1,59 @@
+#!/usr/bin/env python
+
+import argparse
+import boto.ec2
+import datetime
+import hashlib
+import os
+import simplejson
+import string
+import subprocess
+import sys
+import time
+import urllib2
+import yaml
+
+cli = argparse.ArgumentParser(description='Utility for applying the tri-name as the hostname. This command is idempotent.')
+cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+
+cliargs = cli.parse_args()
+
+#
+# setup our basics
+#
+
+DEVNULL = open(os.devnull, 'w')
+
+if cliargs.verbose > 2:
+  TASK_STDOUT = None
+  TASK_STDERR = None
+else:
+  TASK_STDOUT = DEVNULL
+  TASK_STDERR = DEVNULL
+
+
+#
+# ready, set, go...
+#
+
+ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+
+instance = ec2api.get_all_instances([ ec2instance['instanceId'] ]).pop().instances.pop()
+
+hostname = '%s--%s--%s' % ( instance.tags['Environment'], instance.tags['Service'], instance.tags['Name'].replace('/', '--') )
+
+if cliargs.verbose > 1:
+  sys.stdout.write('updating hostname...\n')
+
+open('/etc/hostname', 'w').write(hostname)
+
+subprocess.check_call(
+  '/bin/hostname %s' % ( hostname ),
+  shell=True,
+  stdout=TASK_STDOUT,
+  stderr=TASK_STDERR
+)
+
+if cliargs.verbose > 0:
+  sys.stdout.write('updated hostname\n')
