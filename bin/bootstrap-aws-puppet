@@ -18,7 +18,7 @@ mkdir /usr/local/scs-utils
 pushd /usr/local/scs-utils
 wget -O- https://github.com/dpb587/scs-docker-utils/archive/master.tar.gz | tar -xz --strip-components 1
 pip install --upgrade -r requirements.txt
-ln -s bin/* /usr/bin/
+ln -s $PWD/bin/* /usr/bin/
 popd
 
 # cfn-bootstrap
