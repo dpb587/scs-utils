@@ -36,6 +36,7 @@ else:
   TASK_STDOUT = DEVNULL
   TASK_STDERR = DEVNULL
 
+absmanifest = os.path.abspath(cliargs.manifest)
 
 #
 # load configuration
@@ -175,7 +176,7 @@ for volkey in config_runtime['volumes']:
 
   if 'aws_ec2_ebs' == volval['method']:
     if False == volmap:
-      # there's apparently not one; find one
+      voldevice = False
 
       for key in devicemap:
         voldevice = devicemap[key]
@@ -186,6 +187,12 @@ for volkey in config_runtime['volumes']:
       if False == voldevice:
         raise RuntimeError('No devices are available.')
 
+      if 'name' in volval['options']:
+        if 'role' in volval['options']['name']:
+          rolename = volval['options']['name']['role']
+        else:
+          rolename = '%s/%s' % ( config_runtime['about']['role'], volkey )
+
       subprocess.check_call(
         'scs-docker-volumes-aws-ec2-ebs-mount -vvv --fstab --mkfs-type "%s" --aws-ebs-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
           (
@@ -193,7 +200,7 @@ for volkey in config_runtime['volumes']:
             volval['options']['size'],
             config_runtime['about']['environment'],
             config_runtime['about']['service'],
-            '%s/%s' % ( config_runtime['about']['role'], volkey ),
+            rolename,
             voldevice,
             '/mnt/%s--%s' % ( installname, volkey )
           )
@@ -201,16 +208,17 @@ for volkey in config_runtime['volumes']:
         shell=True
       )
 
-      # store this for later
       pstate['volumes'][volkey] = {}
-
-      if 'mounts' in volval:
-        for subval in volval['mounts']:
-          pstate['volumes'][subval]['device'] = voldevice
-          pstate['volumes'][subval]['path'] = '/mnt/%s--%s/%s' % ( installname, volkey, subval )
+      pstate['volumes'][volkey]['device'] = voldevice
+      pstate['volumes'][volkey]['path'] = '/mnt/%s--%s' % ( installname, volkey )
+  elif 'local' == volval['method']:
+    if False == volmap:
+      if 'volume' in volval['options']:
+        path = '%s/%s' % ( pstate['volumes'][volval['options']['volume']]['path'], volval['options']['path'] )
       else:
-        pstate['volumes'][volkey]['device'] = voldevice
-        pstate['volumes'][volkey]['path'] = '/mnt/%s--%s' % ( installname, volkey )
+        path = volval['options']['path']
+
+      os.mkdir(path, 0700)
   else:
     raise RuntimeError('Unexpected volume method')
 
@@ -221,12 +229,12 @@ for volkey in config_runtime['volumes']:
 
 conf = []
 conf.append('[program:%s]' % installname)
-conf.append('command = scs-docker-run %s %s' % ( installname, cliargs.manifest ))
+conf.append('command = scs-docker-run --name %s %s' % ( installname, absmanifest ))
 conf.append('autorestart = true')
-conf.append('stdout_logfile = /var/log/supervisord/%(program_name)s-stdout.log')
-conf.append('stderr_logfile = /var/log/supervisord/%(program_name)s-stderr.log')
+conf.append('stdout_logfile = /var/log/supervisor/%(program_name)s-stdout.log')
+conf.append('stderr_logfile = /var/log/supervisor/%(program_name)s-stderr.log')
 
-open('/etc/supervisor/conf.d/%s.conf' % installname, 'w').write('\n'.join(conf))
+open('/etc/supervisor/%s.ini' % installname, 'w').write('\n'.join(conf))
 
 if cliargs.verbose > 1:
   sys.stdout.write('updating supervisord...\n')

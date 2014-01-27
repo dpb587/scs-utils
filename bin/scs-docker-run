@@ -27,8 +27,6 @@ cliargs = cli.parse_args()
 #
 
 http = urllib3.PoolManager()
-ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
-ec2api = boto.ec2.connect_to_region(ec2instance['region'])
 
 DEVNULL = open(os.devnull, 'w')
 
@@ -163,27 +161,31 @@ if 'provides' in config_definition:
     dockerargs.append('%s' % config_definition['provides'][provision]['port'])
 
 for volkey in pstate['volumes']:
-  dockerargs.append('-v')
-  dockerargs.append('%s:/scs/mnt/%s' % ( pstate['volumes'][volkey]['path'], volkey ))
+  if volkey in config_definition['volumes']:
+    dockerargs.append('-v')
+    dockerargs.append('%s:/scs/mnt/%s' % ( pstate['volumes'][volkey]['path'], volkey ))
 
-for required in config_definition['requires']:
-  req = config_runtime['requires'][required]
+if 'requires' in config_definition:
+  for required in config_definition['requires']:
+    req = config_runtime['requires'][required]
 
-  if 'etcd_watch' == req['method']:
-    val = simplejson.loads(urllib2.urlopen('http://%s/v2/keys/%s?recursive=true' % ( req['options']['cluster'], req['options']['path'] % os.environ )).read())
+    if 'etcd_watch' == req['method']:
+      val = simplejson.loads(urllib2.urlopen('http://%s/v2/keys/%s?recursive=true' % ( req['options']['cluster'], req['options']['path'] % os.environ )).read())
 
-    if 0 == len(val['node']['nodes']):
-      raise RuntimeError('Unable to resolve requirement')
+      if 0 == len(val['node']['nodes']):
+        raise RuntimeError('Unable to resolve requirement')
 
-    os.environ['SCS_REQUIRE_%s' % required.upper()] = val['node']['nodes'][0]['value']
-  else:
-    raise RuntimeError('Unexpected requires method')
+      os.environ['SCS_REQUIRE_%s' % required.upper()] = val['node']['nodes'][0]['value']
+    else:
+      raise RuntimeError('Unexpected requires method')
 
 dockerargs.append('-cidfile')
 dockerargs.append('/var/lib/scs-docker/%s/container' % installname)
 
 dockerargs.append(uid)
 dockerargs.append('/scs/scs/bin/run')
+
+sys.stdout.write('--> %s\n' % ' '.join(dockerargs))
 
 container = subprocess.Popen(
   dockerargs,
@@ -202,7 +204,7 @@ def unregister():
         os.environ['SCS_SERVICE'],
         os.environ['SCS_ROLE'],
         provides,
-        pubport.split(':')[0],
+        os.environ['SCS_RUN_ADDR'],
         os.environ['SCS_RUN_NAME'],
       )
     )
@@ -250,7 +252,7 @@ for provides in config_definition['provides']:
         os.environ['SCS_SERVICE'],
         os.environ['SCS_ROLE'],
         provides,
-        pubport.split(':')[0],
+        os.environ['SCS_RUN_ADDR'],
         os.environ['SCS_RUN_NAME'],
       ),
       pubport
