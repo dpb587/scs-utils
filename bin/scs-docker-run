@@ -1,0 +1,266 @@
+#!/usr/bin/env python
+
+import argparse
+import boto.ec2
+import datetime
+import hashlib
+import os
+import simplejson
+import string
+import subprocess
+import sys
+import time
+import urllib2
+import urllib3
+import yaml
+import signal
+
+cli = argparse.ArgumentParser(description='Run a docker image.')
+cli.add_argument('manifest', help='Local path for configuration manifest')
+cli.add_argument('--name', help='Override default name for installation')
+cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+
+cliargs = cli.parse_args()
+
+#
+# setup our basics
+#
+
+http = urllib3.PoolManager()
+ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+
+DEVNULL = open(os.devnull, 'w')
+
+if cliargs.verbose > 2:
+  TASK_STDOUT = sys.stdout
+  TASK_STDERR = sys.stderr
+else:
+  TASK_STDOUT = DEVNULL
+  TASK_STDERR = DEVNULL
+
+
+#
+# load configuration
+#
+
+config_runtime = yaml.safe_load(open(cliargs.manifest, 'r').read())
+
+
+#
+# identifiers
+#
+
+if 'git' == config_runtime['source']['type']:
+  if 'reference' in config_runtime['source']:
+    niceref = config_runtime['source']['reference']
+  else:
+    niceref = 'master'
+
+  if 40 != len(niceref):
+    p = subprocess.Popen(
+      'git ls-remote "%s" | grep -E \'refs/(heads|tags)/%s\' | awk \'{ print $1 }\'' % ( config_runtime['source']['url'], niceref ),
+      shell=True,
+      stdout=subprocess.PIPE
+    )
+
+    if 0 < p.returncode:
+      raise RuntimeError('Unable to resolve source reference.')
+
+    realref = p.stdout.read().strip()
+else:
+  raise RuntimeError('Unexpected source type.')
+
+
+nid = '%s--%s--%s' % (
+  config_runtime['about']['environment'],
+  config_runtime['about']['service'],
+  config_runtime['about']['role'],
+)
+rid = hashlib.md5('%s\n%s\n%s\n%s' % ( nid, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
+uid = '%s--%s' % ( nid, rid[:12] )
+
+if cliargs.name:
+  installname = cliargs.name
+else:
+  installname = 'scs-%s' % nid
+
+
+#
+# load image definition
+#
+
+p = subprocess.Popen(
+  'docker inspect -format "{{.id}}" %s' % uid,
+  shell=True,
+  stdout=subprocess.PIPE
+)
+
+if 0 < p.returncode:
+  raise RuntimeError('Unable to inspect the expected image.')
+
+imageid = p.stdout.read().strip()
+
+config_definition = yaml.safe_load(open('/var/lib/docker/aufs/mnt/%s/scs/scs/manifest.yaml' % imageid, 'r').read())
+
+
+#
+# load previous state
+#
+
+pstate = simplejson.load(open('/var/lib/scs-docker/%s/state.json' % installname, 'r'))
+
+
+#
+# figure out some terms
+#
+
+os.environ['SCS_ENVIRONMENT'] = config_runtime['about']['environment']
+os.environ['SCS_SERVICE'] = config_runtime['about']['service']
+os.environ['SCS_ROLE'] = config_runtime['about']['role']
+os.environ['SCS_RUN_ZONE'] = 'aws-use1d'
+
+# lookup hostname
+p = subprocess.Popen(
+  'hostname',
+  shell=True,
+  stdout=subprocess.PIPE
+)
+
+os.environ['SCS_RUN_HOST'] = p.stdout.read().strip()
+
+# lookup eth0
+p = subprocess.Popen(
+  'hostname -I | awk \'{ print $1 }\'',
+  shell=True,
+  stdout=subprocess.PIPE
+)
+
+os.environ['SCS_RUN_ADDR'] = p.stdout.read().strip()
+
+# generate run name
+os.environ['SCS_RUN_NAME'] = hashlib.md5('%s\n%s\n%s' % ( uid, installname, os.environ['SCS_RUN_HOST'] )).hexdigest()[:12]
+
+#
+# build or docker command
+#
+
+dockerargs = [ '/usr/bin/docker' ]
+dockerargs.append('run')
+
+dockerargs.append('-e')
+dockerargs.append('SCS_RUN_ZONE=%s' % os.environ['SCS_RUN_ZONE'])
+
+dockerargs.append('-e')
+dockerargs.append('SCS_RUN_HOST=%s' % os.environ['SCS_RUN_HOST'])
+
+dockerargs.append('-e')
+dockerargs.append('SCS_RUN_NAME=%s' % os.environ['SCS_RUN_NAME'])
+
+if 'provides' in config_definition:
+  for provision in config_definition['provides']:
+    dockerargs.append('-p')
+    dockerargs.append('%s' % config_definition['provides'][provision]['port'])
+
+for volkey in pstate['volumes']:
+  dockerargs.append('-v')
+  dockerargs.append('%s:/scs/mnt/%s' % ( pstate['volumes'][volkey]['path'], volkey ))
+
+for required in config_definition['requires']:
+  req = config_runtime['requires'][required]
+
+  if 'etcd_watch' == req['method']:
+    val = simplejson.loads(urllib2.urlopen('http://%s/v2/keys/%s?recursive=true' % ( req['options']['cluster'], req['options']['path'] % os.environ )).read())
+
+    if 0 == len(val['node']['nodes']):
+      raise RuntimeError('Unable to resolve requirement')
+
+    os.environ['SCS_REQUIRE_%s' % required.upper()] = val['node']['nodes'][0]['value']
+  else:
+    raise RuntimeError('Unexpected requires method')
+
+dockerargs.append('-cidfile')
+dockerargs.append('/var/lib/scs-docker/%s/container' % installname)
+
+dockerargs.append(uid)
+dockerargs.append('/scs/scs/bin/run')
+
+container = subprocess.Popen(
+  dockerargs,
+  stdout=sys.stdout,
+  stderr=sys.stderr,
+)
+
+def unregister():
+  for provides in config_definition['provides']:
+    http.request(
+      'DELETE',
+      'http://%s/v2/keys/%s/service-locator/%s/%s/%s/%s/%s-%s' % (
+        'etcd:4001',
+        os.environ['SCS_RUN_ZONE'],
+        os.environ['SCS_ENVIRONMENT'],
+        os.environ['SCS_SERVICE'],
+        os.environ['SCS_ROLE'],
+        provides,
+        pubport.split(':')[0],
+        os.environ['SCS_RUN_NAME'],
+      )
+    )
+
+    sys.stdout.write('--> unregistered %s from %s\n' % ( pubport, provides ))
+
+def forwardsig(sig, frame):
+  sys.stdout.write('--> received signal %s\n' % sig)
+
+  if sig in [ signal.SIGTERM, signal.SIGINT, signal.SIGQUIT ]:
+    unregister()
+
+  container.send_signal(sig)
+
+signal.signal(signal.SIGTERM, forwardsig)
+signal.signal(signal.SIGHUP, forwardsig)
+signal.signal(signal.SIGINT, forwardsig)
+signal.signal(signal.SIGUSR1, forwardsig)
+signal.signal(signal.SIGUSR2, forwardsig)
+signal.signal(signal.SIGQUIT, forwardsig)
+
+sys.stdout.write('--> watching pid %s\n' % container.pid)
+
+time.sleep(2)
+
+containerid = open('/var/lib/scs-docker/%s/container' % installname, 'r').read()
+
+sys.stdout.write('--> running container %s\n' % containerid)
+
+for provides in config_definition['provides']:
+  p = subprocess.Popen(
+    'docker port %s %s' % ( containerid, config_definition['provides'][provides]['port'] ),
+    shell=True,
+    stdout=subprocess.PIPE
+  )
+
+  pubport = p.stdout.read().strip().replace('0.0.0.0:', '%s:' % os.environ['SCS_RUN_ADDR'])
+
+  upd = urllib2.urlopen(
+    urllib2.Request(
+      'http://%s/v2/keys/%s/service-locator/%s/%s/%s/%s/%s-%s' % (
+        'etcd:4001',
+        os.environ['SCS_RUN_ZONE'],
+        os.environ['SCS_ENVIRONMENT'],
+        os.environ['SCS_SERVICE'],
+        os.environ['SCS_ROLE'],
+        provides,
+        pubport.split(':')[0],
+        os.environ['SCS_RUN_NAME'],
+      ),
+      pubport
+    )
+  )
+
+  sys.stdout.write('--> registered %s to %s\n' % ( provides, pubport ))
+
+container.wait()
+
+os.remove('/var/lib/scs-docker/%s/container' % installname)
+
+unregister()

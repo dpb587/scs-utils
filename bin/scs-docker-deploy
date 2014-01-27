@@ -1,0 +1,243 @@
+#!/usr/bin/env python
+
+import argparse
+import boto.ec2
+import datetime
+import hashlib
+import os
+import simplejson
+import string
+import subprocess
+import sys
+import time
+import urllib2
+import yaml
+
+cli = argparse.ArgumentParser(description='Utility for building, caching, and compiling scs-based docker images. This command is idempotent.')
+cli.add_argument('manifest', help='Local path for configuration manifest')
+cli.add_argument('--name', help='Override default name for installation')
+cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+
+cliargs = cli.parse_args()
+
+#
+# setup our basics
+#
+
+ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+
+DEVNULL = open(os.devnull, 'w')
+
+if cliargs.verbose > 2:
+  TASK_STDOUT = sys.stdout
+  TASK_STDERR = sys.stderr
+else:
+  TASK_STDOUT = DEVNULL
+  TASK_STDERR = DEVNULL
+
+
+#
+# load configuration
+#
+
+config_runtime = yaml.safe_load(open(cliargs.manifest, 'r').read())
+
+
+#
+# identifiers
+#
+
+if 'git' == config_runtime['source']['type']:
+  if 'reference' in config_runtime['source']:
+    niceref = config_runtime['source']['reference']
+  else:
+    niceref = 'master'
+
+  if 40 != len(niceref):
+    p = subprocess.Popen(
+      'git ls-remote "%s" | grep -E \'refs/(heads|tags)/%s\' | awk \'{ print $1 }\'' % ( config_runtime['source']['url'], niceref ),
+      shell=True,
+      stdout=subprocess.PIPE
+    )
+
+    if 0 < p.returncode:
+      raise RuntimeError('Unable to resolve source reference.')
+
+    realref = p.stdout.read().strip()
+else:
+  raise RuntimeError('Unexpected source type.')
+
+
+nid = '%s--%s--%s' % (
+  config_runtime['about']['environment'],
+  config_runtime['about']['service'],
+  config_runtime['about']['role'],
+)
+rid = hashlib.md5('%s\n%s\n%s\n%s' % ( nid, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
+uid = '%s--%s' % ( nid, rid[:12] )
+
+if cliargs.name:
+  installname = cliargs.name
+else:
+  installname = 'scs-%s' % nid
+
+
+#
+# load image definition
+#
+
+p = subprocess.Popen(
+  'docker inspect -format "{{.id}}" %s' % uid,
+  shell=True,
+  stdout=subprocess.PIPE
+)
+
+if 0 < p.returncode:
+  raise RuntimeError('Unable to inspect the expected image.')
+
+imageid = p.stdout.read().strip()
+
+config_definition = yaml.safe_load(open('/var/lib/docker/aufs/mnt/%s/scs/scs/manifest.yaml' % imageid, 'r').read())
+
+
+#
+# load previous state
+#
+
+if not os.path.exists('/var/lib/scs-docker'):
+  os.mkdir('/var/lib/scs-docker', 0700)
+if not os.path.exists('/var/lib/scs-docker/%s' % installname):
+  os.mkdir('/var/lib/scs-docker/%s' % installname, 0700)
+
+if os.path.exists('/var/lib/scs-docker/%s/state.json' % installname):
+  pstate = simplejson.load(open('/var/lib/scs-docker/%s/state.json' % installname, 'r'))
+else:
+  pstate = {}
+
+if 'docker' not in pstate:
+  pstate['docker'] = {}
+if 'volumes' not in pstate:
+  pstate['volumes'] = {}
+if 'requires' not in pstate:
+  pstate['requires'] = {}
+
+pstate['docker']['image'] = uid
+
+
+def excepthook(type, value, traceback):
+  writepstate()
+  sys.__excepthook__(type, value, traceback)
+
+def writepstate():
+  simplejson.dump(pstate, open('/var/lib/scs-docker/%s/state.json' % installname, 'w'))
+
+sys.excepthook = writepstate
+
+#
+# check available volumes, if necessary
+#
+
+devicemap = {
+  '/dev/sdf' : '/dev/xvdf',
+  '/dev/sdg' : '/dev/xvdg',
+  '/dev/sdh' : '/dev/xvdh',
+  '/dev/sdi' : '/dev/xvdi',
+  '/dev/sdj' : '/dev/xvdj',
+  '/dev/sdk' : '/dev/xvdk',
+  '/dev/sdl' : '/dev/xvdl',
+  '/dev/sdm' : '/dev/xvdm',
+  '/dev/sdn' : '/dev/xvdn',
+  '/dev/sdo' : '/dev/xvdo',
+  '/dev/sdp' : '/dev/xvdp',
+}
+
+if 'volumes' in config_runtime:
+  volumes = ec2api.get_all_volumes(filters = { 'attachment.instance-id' : ec2instance['instanceId'] })
+
+  for volume in volumes:
+    if volume.attach_data.device in devicemap:
+      del devicemap[volume.attach_data.device]
+
+
+#
+# handle volume mounts
+#
+
+for volkey in config_runtime['volumes']:
+  volval = config_runtime['volumes'][volkey] 
+
+  volmap = False
+
+  # see if we're already supposed to use a volume
+  if volkey in pstate['volumes']:
+    volmap = pstate['volumes'][volkey]
+
+  if 'aws_ec2_ebs' == volval['method']:
+    if False == volmap:
+      # there's apparently not one; find one
+
+      for key in devicemap:
+        voldevice = devicemap[key]
+        del devicemap[key]
+
+        break
+
+      if False == voldevice:
+        raise RuntimeError('No devices are available.')
+
+      subprocess.check_call(
+        'scs-docker-volumes-aws-ec2-ebs-mount -vvv --fstab --mkfs-type "%s" --aws-ebs-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
+          (
+            volval['options']['format'],
+            volval['options']['size'],
+            config_runtime['about']['environment'],
+            config_runtime['about']['service'],
+            '%s/%s' % ( config_runtime['about']['role'], volkey ),
+            voldevice,
+            '/mnt/%s--%s' % ( installname, volkey )
+          )
+          ,
+        shell=True
+      )
+
+      # store this for later
+      pstate['volumes'][volkey] = {}
+
+      if 'mounts' in volval:
+        for subval in volval['mounts']:
+          pstate['volumes'][subval]['device'] = voldevice
+          pstate['volumes'][subval]['path'] = '/mnt/%s--%s/%s' % ( installname, volkey, subval )
+      else:
+        pstate['volumes'][volkey]['device'] = voldevice
+        pstate['volumes'][volkey]['path'] = '/mnt/%s--%s' % ( installname, volkey )
+  else:
+    raise RuntimeError('Unexpected volume method')
+
+
+#
+# supervisor update
+#
+
+conf = []
+conf.append('[program:%s]' % installname)
+conf.append('command = scs-docker-run %s %s' % ( installname, cliargs.manifest ))
+conf.append('autorestart = true')
+conf.append('stdout_logfile = /var/log/supervisord/%(program_name)s-stdout.log')
+conf.append('stderr_logfile = /var/log/supervisord/%(program_name)s-stderr.log')
+
+open('/etc/supervisor/conf.d/%s.conf' % installname, 'w').write('\n'.join(conf))
+
+if cliargs.verbose > 1:
+  sys.stdout.write('updating supervisord...\n')
+
+subprocess.call(
+  [ 'supervisorctl', '-c', '/etc/supervisor/supervisord.conf', 'update' ],
+  stdout=TASK_STDOUT,
+  stderr=TASK_STDERR
+)
+
+if cliargs.verbose > 0:
+  sys.stdout.write('updated supervisord\n')
+
+writepstate()
