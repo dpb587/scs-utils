@@ -74,7 +74,7 @@ nid = '%s--%s--%s' % (
   config_runtime['about']['service'],
   config_runtime['about']['role'],
 )
-rid = hashlib.md5('%s\n%s\n%s\n%s' % ( nid, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
+rid = hashlib.md5('%s\n%s\n%s\n%s\n%s' % ( nid, realref, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
 uid = '%s--%s' % ( nid, rid[:12] )
 
 if cliargs.name:
@@ -148,7 +148,15 @@ requires = {}
 def lookup_requires_etcd_watch(cluster, path):
   val = simplejson.loads(http.request('GET', 'http://%s/v2/keys/%s?recursive=true' % ( cluster, path % os.environ )).data)
 
-  if 0 == len(val['node']['nodes']):
+  if 1 < cliargs.verbose:
+    simplejson.dump(val, sys.stdout)
+    sys.stdout.write('\n')
+
+  if 'errorCode' in val:
+    raise RuntimeError('etcd error: %s' % val['message'])
+  elif 'nodes' not in val['node']:
+    return None
+  elif 0 == len(val['node']['nodes']):
     raise RuntimeError('Unable to resolve requirement')
 
   return val['node']['nodes'][0]['value']
@@ -175,8 +183,8 @@ def signal_reload_requires(sig, frame):
 
   for key in newreqs:
     if newreqs[key] != requires[key]:
-      if 'liveupdate' in config_definition['requires'][key]['options']:
-        if subprocess.check_call('lxc-attach -n %s --keep-env %s' % ( container, config_definition['requires'][key]['options'] )):
+      if 'liveupdate' in config_definition['requires'][key]:
+        if subprocess.check_call('lxc-attach -n %s --keep-env %s' % ( containerid, config_definition['requires'][key]['liveupdate'] ), shell=True, env={ 'SCS_REQUIRES_%s' % key.upper() : '%s' % newreqs[key] }, stdout=TASK_STDOUT, stderr=TASK_STDERR):
           clean = False
 
           break
@@ -208,12 +216,14 @@ if 'requires' in config_definition:
   requires = reload_requires()
 
   for key in requires:
-    dockerargs.extend([ '-e', 'SCS_REQUIRES_%s=%s' % ( key.upper(), newreqs[key] ) ])
+    dockerargs.extend([ '-e', 'SCS_REQUIRES_%s=%s' % ( key.upper(), requires[key] ) ])
 
   for required in config_definition['requires']:
+    req = config_runtime['requires'][required]
+
     if 'etcd_watch' == req['method']:
       if req['options']['cluster'] not in etcdwatch_map:
-        etcdwatch_map[etcdwatch_map[req['options']['cluster']]] = []
+        etcdwatch_map[req['options']['cluster']] = []
 
       etcdwatch_map[req['options']['cluster']].append(req['options']['path'] % os.environ)
   
@@ -228,15 +238,18 @@ sys.stdout.write('--> %s\n' % ' '.join(dockerargs))
 etcdwatch_procs = {}
 
 for cluster in etcdwatch_map:
-  sys.stdout.write('--> starting watcher on %s for ' % ( cluster, ', '.join(etcdwatch_map[cluster]) ))
+  sys.stdout.write('--> starting watcher on %s for %s' % ( cluster, ', '.join(etcdwatch_map[cluster]) ))
+
+  args = [
+    '/usr/bin/scs-docker-run-monitor',
+    '--etcd', cluster,
+    '--notify-pid', '%s' % os.getpid(),
+    '--notify-signal', 'SIGUSR1'
+  ]
+  args.extend(etcdwatch_map[cluster])
 
   etcdwatch_procs[cluster] = subprocess.Popen(
-    [
-      'scs-docker-run-monitor',
-      '--etcd', cluster,
-      '--notify-pid', os.getpid(),
-      '--notify-signal', 'SIGUSR1'
-    ].extend(etcdwatch_map[cluster]),
+    args,
     stdout=sys.stdout,
     stderr=sys.stderr,
   )
@@ -283,7 +296,7 @@ signal.signal(signal.SIGUSR1, signal_reload_requires)
 
 sys.stdout.write('--> watching pid %s\n' % container.pid)
 
-time.sleep(10)
+time.sleep(2)
 
 
 containerid = open('/var/lib/scs-docker/%s/container' % installname, 'r').read()

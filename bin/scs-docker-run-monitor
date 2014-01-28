@@ -46,6 +46,8 @@ function watchPath(path) {
     return;
   }
 
+  var timedout = false;
+
   var req = http.request(
     {
       host : cliargs.etcd[0],
@@ -76,6 +78,9 @@ function watchPath(path) {
   req.setTimeout(
     120000,
     function () {
+      timedout = true;
+
+      this.end();
       req.abort();
 
       delete requests[path];
@@ -87,7 +92,7 @@ function watchPath(path) {
   req.on(
     'error',
     function (err) {
-      if (shuttingdown) {
+      if (shuttingdown || timedout) {
         return;
       }
 

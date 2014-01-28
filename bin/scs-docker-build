@@ -86,7 +86,7 @@ nid = '%s--%s--%s' % (
   config_runtime['about']['service'],
   config_runtime['about']['role'],
 )
-rid = hashlib.md5('%s\n%s\n%s\n%s' % ( nid, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
+rid = hashlib.md5('%s\n%s\n%s\n%s\n%s' % ( nid, realref, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
 uid = '%s--%s' % ( nid, rid[:12] )
 
 
@@ -150,6 +150,8 @@ if not isLocal:
 
       if subprocess.call([ 'git', 'diff', '--exit-code', '--quiet' ], stdout=TASK_STDOUT, stderr=TASK_STDERR):
         raise RuntimeError('The working directory "%s" is not clean.' % cliargs.path)
+
+      subprocess.check_call([ 'git', 'fetch' ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
     else:
       if cliargs.verbose > 1:
         sys.stdout.write('cloning repository...\n')
@@ -204,7 +206,7 @@ if not isLocal:
   dockerfile.append('ENV SCS_SERVICE %s' % config_runtime['about']['service'])
   dockerfile.append('ENV SCS_ROLE %s' % config_runtime['about']['role'])
   dockerfile.append('RUN /usr/bin/puppet apply --modulepath=/scs/scs/puppet:/etc/puppet/modules:/usr/share/puppet/modules /scs/scs/runtime/puppet.pp')
-  dockerfile.append('RUN /usr/bin/apt-get -y remove --purge puppet && /usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
+  dockerfile.append('RUN /usr/bin/apt-get -y remove --purge puppet && /usr/bin/apt-get -y autoremove --purge && /usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
 
   if 'volumes' in config_definition:
     for volume in config_definition['volumes']:

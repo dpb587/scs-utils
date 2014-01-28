@@ -75,7 +75,7 @@ nid = '%s--%s--%s' % (
   config_runtime['about']['service'],
   config_runtime['about']['role'],
 )
-rid = hashlib.md5('%s\n%s\n%s\n%s' % ( nid, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
+rid = hashlib.md5('%s\n%s\n%s\n%s\n%s' % ( nid, realref, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
 uid = '%s--%s' % ( nid, rid[:12] )
 
 if cliargs.name:
