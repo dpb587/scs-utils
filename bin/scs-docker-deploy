@@ -187,11 +187,11 @@ for volkey in config_runtime['volumes']:
       if False == voldevice:
         raise RuntimeError('No devices are available.')
 
+      rolename = '%s/%s' % ( config_runtime['about']['role'], volkey )
+
       if 'name' in volval['options']:
         if 'role' in volval['options']['name']:
           rolename = volval['options']['name']['role']
-        else:
-          rolename = '%s/%s' % ( config_runtime['about']['role'], volkey )
 
       subprocess.check_call(
         'scs-docker-volumes-aws-ec2-ebs-mount -vvv --fstab --mkfs-type "%s" --aws-ebs-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
@@ -218,7 +218,11 @@ for volkey in config_runtime['volumes']:
       else:
         path = volval['options']['path']
 
-      os.mkdir(path, 0700)
+      if not os.path.exists(path):
+        os.mkdir(path, 0700)
+
+      pstate['volumes'][volkey] = {}
+      pstate['volumes'][volkey]['path'] = path
   else:
     raise RuntimeError('Unexpected volume method')
 

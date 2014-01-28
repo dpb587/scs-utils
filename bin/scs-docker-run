@@ -10,7 +10,6 @@ import string
 import subprocess
 import sys
 import time
-import urllib2
 import urllib3
 import yaml
 import signal
@@ -170,12 +169,13 @@ if 'requires' in config_definition:
     req = config_runtime['requires'][required]
 
     if 'etcd_watch' == req['method']:
-      val = simplejson.loads(urllib2.urlopen('http://%s/v2/keys/%s?recursive=true' % ( req['options']['cluster'], req['options']['path'] % os.environ )).read())
+      val = simplejson.loads(http.request('GET', 'http://%s/v2/keys/%s?recursive=true' % ( req['options']['cluster'], req['options']['path'] % os.environ )).data)
 
       if 0 == len(val['node']['nodes']):
         raise RuntimeError('Unable to resolve requirement')
 
-      os.environ['SCS_REQUIRE_%s' % required.upper()] = val['node']['nodes'][0]['value']
+      dockerargs.append('-e')
+      dockerargs.append('SCS_REQUIRES_%s=%s' % ( required.upper(), val['node']['nodes'][0]['value'] ))
     else:
       raise RuntimeError('Unexpected requires method')
 
@@ -211,6 +211,8 @@ def unregister():
 
     sys.stdout.write('--> unregistered %s from %s\n' % ( pubport, provides ))
 
+  isRegistered = False
+
 def forwardsig(sig, frame):
   sys.stdout.write('--> received signal %s\n' % sig)
 
@@ -228,7 +230,7 @@ signal.signal(signal.SIGQUIT, forwardsig)
 
 sys.stdout.write('--> watching pid %s\n' % container.pid)
 
-time.sleep(2)
+time.sleep(10)
 
 containerid = open('/var/lib/scs-docker/%s/container' % installname, 'r').read()
 
@@ -243,20 +245,22 @@ for provides in config_definition['provides']:
 
   pubport = p.stdout.read().strip().replace('0.0.0.0:', '%s:' % os.environ['SCS_RUN_ADDR'])
 
-  upd = urllib2.urlopen(
-    urllib2.Request(
-      'http://%s/v2/keys/%s/service-locator/%s/%s/%s/%s/%s-%s' % (
-        'etcd:4001',
-        os.environ['SCS_RUN_ZONE'],
-        os.environ['SCS_ENVIRONMENT'],
-        os.environ['SCS_SERVICE'],
-        os.environ['SCS_ROLE'],
-        provides,
-        os.environ['SCS_RUN_ADDR'],
-        os.environ['SCS_RUN_NAME'],
-      ),
-      pubport
-    )
+  http.request_encode_body(
+    'PUT',
+    'http://%s/v2/keys/%s/service-locator/%s/%s/%s/%s/%s-%s' % (
+      'etcd:4001',
+      os.environ['SCS_RUN_ZONE'],
+      os.environ['SCS_ENVIRONMENT'],
+      os.environ['SCS_SERVICE'],
+      os.environ['SCS_ROLE'],
+      provides,
+      os.environ['SCS_RUN_ADDR'],
+      os.environ['SCS_RUN_NAME'],
+    ),
+    {
+      'value' : pubport,
+    },
+    encode_multipart = False
   )
 
   sys.stdout.write('--> registered %s to %s\n' % ( provides, pubport ))
