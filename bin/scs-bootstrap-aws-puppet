@@ -13,6 +13,13 @@ apt-get update
 # core tools
 apt-get -y install git puppet python-pip
 
+# node
+mkdir /usr/local/nodejs
+pushd /usr/local/nodejs
+wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
+ln -s $PWD/bin/* /usr/bin/
+popd
+
 # scs-utils
 mkdir /usr/local/scs-utils
 pushd /usr/local/scs-utils

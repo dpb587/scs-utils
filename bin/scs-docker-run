@@ -142,50 +142,104 @@ os.environ['SCS_RUN_NAME'] = hashlib.md5('%s\n%s\n%s' % ( uid, installname, os.e
 # build or docker command
 #
 
-dockerargs = [ '/usr/bin/docker' ]
-dockerargs.append('run')
+etcdwatch_map = {}
+requires = {}
 
-dockerargs.append('-e')
-dockerargs.append('SCS_RUN_ZONE=%s' % os.environ['SCS_RUN_ZONE'])
+def lookup_requires_etcd_watch(cluster, path):
+  val = simplejson.loads(http.request('GET', 'http://%s/v2/keys/%s?recursive=true' % ( cluster, path % os.environ )).data)
 
-dockerargs.append('-e')
-dockerargs.append('SCS_RUN_HOST=%s' % os.environ['SCS_RUN_HOST'])
+  if 0 == len(val['node']['nodes']):
+    raise RuntimeError('Unable to resolve requirement')
 
-dockerargs.append('-e')
-dockerargs.append('SCS_RUN_NAME=%s' % os.environ['SCS_RUN_NAME'])
+  return val['node']['nodes'][0]['value']
 
-if 'provides' in config_definition:
-  for provision in config_definition['provides']:
-    dockerargs.append('-p')
-    dockerargs.append('%s' % config_definition['provides'][provision]['port'])
+def reload_requires():
+  requires = {}
 
-for volkey in pstate['volumes']:
-  if volkey in config_definition['volumes']:
-    dockerargs.append('-v')
-    dockerargs.append('%s:/scs/mnt/%s' % ( pstate['volumes'][volkey]['path'], volkey ))
-
-if 'requires' in config_definition:
   for required in config_definition['requires']:
     req = config_runtime['requires'][required]
 
     if 'etcd_watch' == req['method']:
-      val = simplejson.loads(http.request('GET', 'http://%s/v2/keys/%s?recursive=true' % ( req['options']['cluster'], req['options']['path'] % os.environ )).data)
-
-      if 0 == len(val['node']['nodes']):
-        raise RuntimeError('Unable to resolve requirement')
-
-      dockerargs.append('-e')
-      dockerargs.append('SCS_REQUIRES_%s=%s' % ( required.upper(), val['node']['nodes'][0]['value'] ))
+      requires[required] = lookup_requires_etcd_watch(req['options']['cluster'], req['options']['path'])
     else:
       raise RuntimeError('Unexpected requires method')
 
-dockerargs.append('-cidfile')
-dockerargs.append('/var/lib/scs-docker/%s/container' % installname)
+  return requires
+
+def signal_reload_requires(sig, frame):
+  sys.stdout.write('--> received reload signal\n')
+
+  newreqs = reload_requires()
+
+  clean = True
+
+  for key in newreqs:
+    if newreqs[key] != requires[key]:
+      if 'liveupdate' in config_definition['requires'][key]['options']:
+        if subprocess.check_call('lxc-attach -n %s --keep-env %s' % ( container, config_definition['requires'][key]['options'] )):
+          clean = False
+
+          break
+      else:
+        clean = False
+
+        break
+
+  if False == clean:
+    container.terminate()
+
+
+dockerargs = [ '/usr/bin/docker' ]
+dockerargs.append('run')
+
+dockerargs.extend([ '-e', 'SCS_RUN_ZONE=%s' % os.environ['SCS_RUN_ZONE'] ])
+dockerargs.extend([ '-e', 'SCS_RUN_HOST=%s' % os.environ['SCS_RUN_HOST'] ])
+dockerargs.extend([ '-e', 'SCS_RUN_NAME=%s' % os.environ['SCS_RUN_NAME'] ])
+
+if 'provides' in config_definition:
+  for provision in config_definition['provides']:
+    dockerargs.extend([ '-p', '%s' % config_definition['provides'][provision]['port'] ])
+
+for volkey in pstate['volumes']:
+  if volkey in config_definition['volumes']:
+    dockerargs.extend([ '-v', '%s:/scs/mnt/%s' % ( pstate['volumes'][volkey]['path'], volkey ) ])
+
+if 'requires' in config_definition:
+  requires = reload_requires()
+
+  for key in requires:
+    dockerargs.extend([ '-e', 'SCS_REQUIRES_%s=%s' % ( key.upper(), newreqs[key] ) ])
+
+  for required in config_definition['requires']:
+    if 'etcd_watch' == req['method']:
+      if req['options']['cluster'] not in etcdwatch_map:
+        etcdwatch_map[etcdwatch_map[req['options']['cluster']]] = []
+
+      etcdwatch_map[req['options']['cluster']].append(req['options']['path'] % os.environ)
+  
+
+dockerargs.extend([ '-cidfile', '/var/lib/scs-docker/%s/container' % installname ])
 
 dockerargs.append(uid)
 dockerargs.append('/scs/scs/bin/run')
 
 sys.stdout.write('--> %s\n' % ' '.join(dockerargs))
+
+etcdwatch_procs = {}
+
+for cluster in etcdwatch_map:
+  sys.stdout.write('--> starting watcher on %s for ' % ( cluster, ', '.join(etcdwatch_map[cluster]) ))
+
+  etcdwatch_procs[cluster] = subprocess.Popen(
+    [
+      'scs-docker-run-monitor',
+      '--etcd', cluster,
+      '--notify-pid', os.getpid(),
+      '--notify-signal', 'SIGUSR1'
+    ].extend(etcdwatch_map[cluster]),
+    stdout=sys.stdout,
+    stderr=sys.stderr,
+  )
 
 container = subprocess.Popen(
   dockerargs,
@@ -224,13 +278,13 @@ def forwardsig(sig, frame):
 signal.signal(signal.SIGTERM, forwardsig)
 signal.signal(signal.SIGHUP, forwardsig)
 signal.signal(signal.SIGINT, forwardsig)
-signal.signal(signal.SIGUSR1, forwardsig)
-signal.signal(signal.SIGUSR2, forwardsig)
 signal.signal(signal.SIGQUIT, forwardsig)
+signal.signal(signal.SIGUSR1, signal_reload_requires)
 
 sys.stdout.write('--> watching pid %s\n' % container.pid)
 
 time.sleep(10)
+
 
 containerid = open('/var/lib/scs-docker/%s/container' % installname, 'r').read()
 
@@ -266,6 +320,9 @@ for provides in config_definition['provides']:
   sys.stdout.write('--> registered %s to %s\n' % ( provides, pubport ))
 
 container.wait()
+
+for cluster in etcdwatch_procs:
+  etcdwatch_procs[cluster].terminate()
 
 os.remove('/var/lib/scs-docker/%s/container' % installname)
 

@@ -1,0 +1,6 @@
+{
+    "dependencies" : {
+        "argparse" : "*",
+        "npmlog" : "0.0.6"
+    }
+}
