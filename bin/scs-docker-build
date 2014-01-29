@@ -5,6 +5,7 @@ import boto.ec2
 import datetime
 import hashlib
 import os
+import re
 import simplejson
 import string
 import subprocess
@@ -14,24 +15,22 @@ import urllib2
 import yaml
 
 cli = argparse.ArgumentParser(description='Utility for deploying a SCS image.')
+cli.add_argument('environment-name', help='Environment name (e.g. prod)')
+cli.add_argument('service-name', help='Service name (e.g. public-blog)')
+cli.add_argument('role-name', help='Role name (e.g. web-wordpress)')
 cli.add_argument('manifest', help='Local path to configuration file')
+cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
 cli.add_argument('--cache-s3-bucket', help='An S3 bucket for caching built images', metavar='BUCKET')
 cli.add_argument('--cache-s3-prefix', help='An optional prefix to use when caching built images to S3', metavar='PREFIX', default='')
-cli.add_argument('--path', help='Use a specific working directory')
 cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
 
 cliargs = cli.parse_args()
-
-if not cliargs.path:
-  raise RuntimeError('--path must be specified')
 
 
 #
 # setup our basics
 #
 
-ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
-ec2api = boto.ec2.connect_to_region(ec2instance['region'])
 s3api = boto.connect_s3()
 
 DEVNULL = open(os.devnull, 'w')
@@ -57,7 +56,7 @@ config_runtime = yaml.safe_load(open(cliargs.manifest, 'r').read())
 
 
 #
-# identifiers
+# resolve source reference
 #
 
 if 'git' == config_runtime['source']['type']:
@@ -66,28 +65,35 @@ if 'git' == config_runtime['source']['type']:
   else:
     niceref = 'master'
 
-  if 40 != len(niceref):
-    p = subprocess.Popen(
-      'git ls-remote "%s" | grep -E \'refs/(heads|tags)/%s\' | awk \'{ print $1 }\'' % ( config_runtime['source']['url'], niceref ),
-      shell=True,
-      stdout=subprocess.PIPE
-    )
+  if not re.search(r"[a-f0-9]{40}", niceref):
+    if not cliargs.source_reference:
+      raise RuntimeError('Unable to resolve source reference "%s" and --source-reference was not specified.' % niceref)
 
-    if 0 < p.returncode:
-      raise RuntimeError('Unable to resolve source reference.')
-
-    realref = p.stdout.read().strip()
+    realref = cliargs.source_reference
+  else:
+    realref = niceref
 else:
   raise RuntimeError('Unexpected source type.')
 
 
-nid = '%s--%s--%s' % (
-  config_runtime['about']['environment'],
-  config_runtime['about']['service'],
-  config_runtime['about']['role'],
+#
+# identifiers
+#
+
+identCommon = '%s--%s--%s' % (
+  cliargs.environment_name,
+  cliargs.service_name,
+  cliargs.role_name,
 )
-rid = hashlib.md5('%s\n%s\n%s\n%s\n%s' % ( nid, realref, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
-uid = '%s--%s' % ( nid, rid[:12] )
+identCompilation = hashlib.md5(
+  '%s\n%s\n%s\n%s\n%s' % (
+    identCommon,
+    realref,
+    yaml.dump(config_runtime['source']),
+    yaml.dump(config_runtime['config']),
+  )
+).hexdigest()
+identFriendly = '%s--%s' % ( identCommon, identCompilation[:12] )
 
 
 #
@@ -96,7 +102,7 @@ uid = '%s--%s' % ( nid, rid[:12] )
 
 isLocal = False
 
-if 0 == subprocess.call([ 'docker', 'inspect', '%s' % uid ], stdout=DEVNULL, stderr=DEVNULL):
+if 0 == subprocess.call([ 'docker', 'inspect', '%s' % identFriendly ], stdout=DEVNULL, stderr=DEVNULL):
   isLocal = True
 
 
@@ -107,7 +113,7 @@ if 0 == subprocess.call([ 'docker', 'inspect', '%s' % uid ], stdout=DEVNULL, std
 isRemote = False
 
 if not isLocal and s3cache:
-  cachekey = s3cache.get_key('%s%s.tar' % ( cliargs.cache_s3_prefix, uid ))
+  cachekey = s3cache.get_key('%s%s.tar' % ( cliargs.cache_s3_prefix, identFriendly ))
 
   if None != cachekey:
     isRemote = True
@@ -115,7 +121,7 @@ if not isLocal and s3cache:
     if cliargs.verbose > 1:
       sys.stdout.write('downloading cached image...\n')
 
-    cachekey.get_contents_to_filename('/tmp/scs--%s.tar' % uid)
+    cachekey.get_contents_to_filename('/tmp/scs--%s.tar' % identFriendly)
 
     if cliargs.verbose > 0:
       sys.stdout.write('downloaded cached images\n')
@@ -124,27 +130,27 @@ if not isLocal and s3cache:
     if cliargs.verbose > 1:
       sys.stdout.write('importing cached image...\n')
 
-    subprocess.call([ 'docker', 'load' ], stdin=open('/tmp/scs--%s.tar' % uid, 'r'), stdout=TASK_STDOUT, stderr=TASK_STDERR)
+    subprocess.call([ 'docker', 'load' ], stdin=open('/tmp/scs--%s.tar' % identFriendly, 'r'), stdout=TASK_STDOUT, stderr=TASK_STDERR)
 
     if cliargs.verbose > 0:
       sys.stdout.write('imported cached image\n')
 
 
-    os.remove('/tmp/scs--%s.tar' % uid)
+    os.remove('/tmp/scs--%s.tar' % identFriendly)
 
     isLocal = True
 
 
 #
-# build when necessary
+# rebuild the image
 #
 
 if not isLocal:
-  if 'git' == config_runtime['source']['type']:
-    #
-    # cloning
-    #
+  #
+  # get a local copy of the repo
+  #
 
+  if 'git' == config_runtime['source']['type']:
     if os.path.exists('%s/.git' % cliargs.path):
       os.chdir(cliargs.path)
 
@@ -174,7 +180,7 @@ if not isLocal:
 
 
   #
-  # discover scs manifest
+  # load scs manifest
   #
 
   if not os.path.exists('scs/manifest.yaml'):
@@ -190,11 +196,11 @@ if not isLocal:
   if not os.path.exists('scs/runtime'):
     os.mkdir('scs/runtime', 0700)
 
-  open('scs/runtime/rid', 'w').write(rid)
+  open('scs/runtime/compilation', 'w').write(identCompilation)
 
 
   #
-  # generate docker
+  # generate Dockerfile
   #
 
   dockerfile = []
@@ -202,9 +208,9 @@ if not isLocal:
   dockerfile.append('FROM %s' % config_definition['docker']['from'])
   dockerfile.append('RUN /bin/echo "deb http://archive.ubuntu.com/ubuntu/ precise universe" >> /etc/apt/sources.list && /usr/bin/apt-get update && /usr/bin/apt-get install -y wget ca-certificates && /usr/bin/wget https://apt.puppetlabs.com/puppetlabs-release-precise.deb && /usr/bin/dpkg -i puppetlabs-release-precise.deb && /bin/rm puppetlabs-release-precise.deb && /usr/bin/apt-get update && /usr/bin/apt-get install -y puppet && /usr/bin/puppet module install puppetlabs/stdlib && /usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
   dockerfile.append('ADD . /scs')
-  dockerfile.append('ENV SCS_ENVIRONMENT %s' % config_runtime['about']['environment'])
-  dockerfile.append('ENV SCS_SERVICE %s' % config_runtime['about']['service'])
-  dockerfile.append('ENV SCS_ROLE %s' % config_runtime['about']['role'])
+  dockerfile.append('ENV SCS_ENVIRONMENT %s' % cliargs.environment_name)
+  dockerfile.append('ENV SCS_SERVICE %s' % cliargs.service_name)
+  dockerfile.append('ENV SCS_ROLE %s' % cliargs.role_name)
   dockerfile.append('RUN /usr/bin/puppet apply --modulepath=/scs/scs/puppet:/etc/puppet/modules:/usr/share/puppet/modules /scs/scs/runtime/puppet.pp')
   dockerfile.append('RUN /usr/bin/apt-get -y remove --purge puppet && /usr/bin/apt-get -y autoremove --purge && /usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
 
@@ -227,7 +233,11 @@ if not isLocal:
   # generate puppet
   #
 
-  puppetfile = []
+  puppetfile = [
+    '$SCS_ENVIRONMENT = "%s"' % cliargs.environment_name,
+    '$SCS_SERVICE = "%s"' % cliargs.service_name,
+    '$SCS_ROLE = "%s"' % cliargs.role_name,
+  ]
 
   if not 'main' in config_runtime['config']:
     puppetfile.append('include scs')
@@ -235,6 +245,10 @@ if not isLocal:
   for parts in config_runtime['config']:
     if 'main' == parts:
       puppetfile.append('ensure_resource("class", "scs", parseyaml("%s"))' % yaml.dump(config_runtime['config']['main']))
+    elif 'puppet' == parts:
+      for ptype in config_runtime['config'][parts]:
+        for pname in config_runtime['config'][parts][ptype]:
+          puppetfile.append('ensure_resource("%s", "%s", parseyaml("%s"))' % ( ptype, pname, yaml.dump(config_runtime['config'][parts][ptype][pname]) ))
     else:
       for k in config_runtime['config'][parts]:
         puppetfile.append('ensure_resource("scs::%s", "%s", parseyaml("%s"))' % ( parts, k, yaml.dump(config_runtime['config'][parts][k]) ))
@@ -250,7 +264,7 @@ if not isLocal:
     sys.stdout.write('building image...\n')
 
   subprocess.check_call(
-    'docker build -rm -t "%s" .' % uid,
+    'docker build -rm -t "%s" .' % identFriendly,
     shell=True,
     stdout=TASK_STDOUT,
     stderr=TASK_STDERR,
@@ -269,8 +283,8 @@ if not isLocal and s3cache and not isRemote:
     sys.stdout.write('exporting cache image...\n')
 
   subprocess.call(
-    [ 'docker', 'save', uid ],
-    stdout=open('/tmp/scs--%s.tar' % uid, 'w'),
+    [ 'docker', 'save', identFriendly ],
+    stdout=open('/tmp/scs--%s.tar' % identFriendly, 'w'),
     stderr=TASK_STDERR
   )
 
@@ -278,14 +292,14 @@ if not isLocal and s3cache and not isRemote:
     sys.stdout.write('exported cache image\n')
 
 
-  cachekey = s3cache.new_key('%s%s.tar' % ( cliargs.cache_s3_prefix, uid ))
+  cachekey = s3cache.new_key('%s%s.tar' % ( cliargs.cache_s3_prefix, identFriendly ))
 
   if cliargs.verbose > 1:
     sys.stdout.write('uploading cache image...\n')
 
-  cachekey.set_contents_from_file(open('/tmp/scs--%s.tar' % uid, 'r'))
+  cachekey.set_contents_from_file(open('/tmp/scs--%s.tar' % identFriendly, 'r'))
 
   if cliargs.verbose > 0:
     sys.stdout.write('uploaded cache image\n')
 
-  os.remove('/tmp/scs--%s.tar' % uid)
+  os.remove('/tmp/scs--%s.tar' % identFriendly)

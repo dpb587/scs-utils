@@ -17,14 +17,15 @@ cli.add_argument('device', help='Local device name to mount on')
 cli.add_argument('path', help='File system path to mount in')
 cli.add_argument('--fstab', help='Include entry in file system tables', action='store_true')
 cli.add_argument('--mkfs-type', help='Disk format for new volumes (passed as -t to mkfs)', metavar='TYPE')
-cli.add_argument('--mkfs-opts', help='Arbitrary format options passed to mkfs for new volumes', metavar='OPTS')
-cli.add_argument('--aws-ebs-size', help='Size for new volumes; in GB', metavar='N', type=int)
-cli.add_argument('--aws-ebs-type', help='Volume type for new volumes (e.g. standard, io1)', metavar='TYPE')
-cli.add_argument('--aws-ebs-iops', help='IOPS for new, provisioned volumes', metavar='N', type=int)
-cli.add_argument('--aws-ebs-snapshot-id', help='Snapshot ID for new volumes (e.g. snap-abcd1234)', metavar='SNAPSHOT_ID')
+cli.add_argument('--mkfs-args', help='Arbitrary format options passed to mkfs for new volumes', metavar='OPTS')
+cli.add_argument('--volume-size', help='Size for new volumes; in GB', metavar='N', type=int)
+cli.add_argument('--volume-type', help='Volume type for new volumes (e.g. standard, io1)', metavar='TYPE')
+cli.add_argument('--volume-iops', help='IOPS for new, provisioned volumes', metavar='N', type=int)
+cli.add_argument('--volume-snapshot-id', help='Snapshot ID for new volumes (e.g. snap-abcd1234)', metavar='SNAPSHOT_ID')
 cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
 
 cliargs = cli.parse_args()
+
 
 #
 # validate our arguments
@@ -47,6 +48,7 @@ devicemap = {
 if cliargs.device not in devicemap:
   raise RuntimeError('Device "%s" is not available.' % cliargs.device)
 
+
 #
 # setup our basics
 #
@@ -62,6 +64,7 @@ else:
 
 ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
 ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+
 
 #
 # verify we can/should mount to the device
@@ -110,14 +113,14 @@ if False == mounted:
       'zone' : ec2instance['availabilityZone'].encode('ascii'),
     }
 
-    if None != cliargs.aws_ebs_iops:
-      dargs['iops'] = cliargs.aws_ebs_iops
-    if None != cliargs.aws_ebs_size:
-      dargs['size'] = cliargs.aws_ebs_size
-    if None != cliargs.aws_ebs_snapshot_id and 'snap-00000000' != cliargs.aws_ebs_snapshot_id:
-      dargs['snapshot'] = cliargs.aws_ebs_snapshot_id
-    if None != cliargs.aws_ebs_type:
-      dargs['volume_type'] = cliargs.aws_ebs_type
+    if None != cliargs.volume_iops:
+      dargs['iops'] = cliargs.volume_iops
+    if None != cliargs.volume_size:
+      dargs['size'] = cliargs.volume_size
+    if None != cliargs.volume_snapshot_id and 'snap-00000000' != cliargs.volume_snapshot_id:
+      dargs['snapshot'] = cliargs.volume_snapshot_id
+    if None != cliargs.volume_type:
+      dargs['volume_type'] = cliargs.volume_type
 
     volume = ec2api.create_volume(**dargs)
 
@@ -177,6 +180,7 @@ if False == mounted:
       'Name' : cliargs.rolename,
     })
 
+
 #
 # disk formatting
 #
@@ -195,6 +199,7 @@ if subprocess.call('/sbin/dumpe2fs %s' % ( cliargs.device ), shell=True, stdout=
   if cliargs.verbose > 0:
     sys.stdout.write('formatted disk (%s)\n' % cliargs.mkfs_type)
 
+
 #
 # logical mount
 #
@@ -210,6 +215,7 @@ if subprocess.call('/bin/cat /proc/mounts | /bin/grep %s' % cliargs.device, shel
 
   if cliargs.verbose > 0:
     sys.stdout.write('logically mounted (%s)\n' % cliargs.path)
+
 
 #
 # fstab update

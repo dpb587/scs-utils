@@ -13,9 +13,19 @@ import time
 import urllib2
 import yaml
 
-cli = argparse.ArgumentParser(description='Utility for building, caching, and compiling scs-based docker images. This command is idempotent.')
-cli.add_argument('manifest', help='Local path for configuration manifest')
-cli.add_argument('--name', help='Override default name for installation')
+cli = argparse.ArgumentParser(description='Deploy an SCS configuration and provision the necessary requirements. This command is idempotent.')
+cli.add_argument('environment-name', help='Environment name (e.g. prod)')
+cli.add_argument('service-name', help='Service name (e.g. public-blog)')
+cli.add_argument('role-name', help='Role name (e.g. web-wordpress)')
+cli.add_argument('manifest', help='Local path to configuration file')
+cli.add_argument('--etcd-cluster', help='The etcd cluster for service registration', default='127.0.0.1:4001', metavar='HOST[:PORT]')
+cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
+cli.add_argument('--suffix-name', help='Suffix the local name (for multiple deploys)', metavar='SUFFIX')
+cli.add_argument('--no-build', help='Do not build an image if one does not already exist locally', action='store_true')
+cli.add_argument('--no-supervisor-control', help='Do not send supervisor control calls after changes', action='store_true')
+cli.add_argument('--build-args', help='Arguments to pass to scs-docker-build')
+cli.add_argument('--supervisor-control-conf', help='Path to configuration for supervisorctl control calls', default='/etc/supervisor/supervisord.conf')
+cli.add_argument('--supervisor-program-conf', help='Path to write supervisor program configuration', default='/etc/supervisor/%%s.ini')
 cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
 
 cliargs = cli.parse_args()
@@ -46,16 +56,19 @@ config_runtime = yaml.safe_load(open(cliargs.manifest, 'r').read())
 
 
 #
-# identifiers
+# resolve source reference
 #
 
 if 'git' == config_runtime['source']['type']:
   if 'reference' in config_runtime['source']:
     niceref = config_runtime['source']['reference']
+  elif cliargs.source_reference:
+    niceref = cliargs.source_reference
   else:
     niceref = 'master'
 
-  if 40 != len(niceref):
+  if not re.search(r"[a-f0-9]{40}", niceref):
+    # seems like a reference; try to find from the remote
     p = subprocess.Popen(
       'git ls-remote "%s" | grep -E \'refs/(heads|tags)/%s\' | awk \'{ print $1 }\'' % ( config_runtime['source']['url'], niceref ),
       shell=True,
@@ -63,25 +76,38 @@ if 'git' == config_runtime['source']['type']:
     )
 
     if 0 < p.returncode:
-      raise RuntimeError('Unable to resolve source reference.')
+      raise RuntimeError('Unable to resolve source reference "%s".' % niceref)
 
     realref = p.stdout.read().strip()
+  else:
+    realref = niceref
 else:
   raise RuntimeError('Unexpected source type.')
 
 
-nid = '%s--%s--%s' % (
-  config_runtime['about']['environment'],
-  config_runtime['about']['service'],
-  config_runtime['about']['role'],
-)
-rid = hashlib.md5('%s\n%s\n%s\n%s\n%s' % ( nid, realref, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
-uid = '%s--%s' % ( nid, rid[:12] )
+#
+# identifiers
+#
 
-if cliargs.name:
-  installname = cliargs.name
+identCommon = '%s--%s--%s' % (
+  cliargs.environment_name,
+  cliargs.service_name,
+  cliargs.role_name,
+)
+identCompilation = hashlib.md5(
+  '%s\n%s\n%s\n%s\n%s' % (
+    identCommon,
+    realref,
+    yaml.dump(config_runtime['source']),
+    yaml.dump(config_runtime['config']),
+  )
+).hexdigest()
+identFriendly = '%s--%s' % ( identCommon, identCompilation[:12] )
+
+if cliargs.suffix_name:
+  identLocal = '%s--%s' % ( identCommon, cliargs.suffix_name )
 else:
-  installname = 'scs-%s' % nid
+  identLocal = identCommon
 
 
 #
@@ -89,13 +115,40 @@ else:
 #
 
 p = subprocess.Popen(
-  'docker inspect -format "{{.id}}" %s' % uid,
+  'docker inspect -format "{{.id}}" %s' % identFriendly,
   shell=True,
   stdout=subprocess.PIPE
 )
 
 if 0 < p.returncode:
-  raise RuntimeError('Unable to inspect the expected image.')
+  # seems like the image isn't here
+  if cliargs.no_build:
+    raise RuntimeError('Unable to inspect the expected image and was told not to build one.')
+
+  # try to build one
+  subprocess.check_call(
+    'scs-docker-deploy --source-reference %s -vvv %s %s %s %s %s' % (
+      realref,
+      cliargs.build_args,
+      cliargs.environment_name,
+      cliargs.service_name,
+      cliargs.role_name,
+      cliargs.manifest,
+    ),
+    shell = True,
+    stdout = TASK_STDOUT,
+    stderr = TASK_STDERR,
+  )
+
+  # try lookup again
+  p = subprocess.Popen(
+    'docker inspect -format "{{.id}}" %s' % identFriendly,
+    shell=True,
+    stdout=subprocess.PIPE
+  )
+
+  if 0 < p.returncode:
+    raise RuntimeError('Unable to inspect the expected image and the build apparently failed.')
 
 imageid = p.stdout.read().strip()
 
@@ -108,32 +161,44 @@ config_definition = yaml.safe_load(open('/var/lib/docker/aufs/mnt/%s/scs/scs/man
 
 if not os.path.exists('/var/lib/scs-docker'):
   os.mkdir('/var/lib/scs-docker', 0700)
-if not os.path.exists('/var/lib/scs-docker/%s' % installname):
-  os.mkdir('/var/lib/scs-docker/%s' % installname, 0700)
+if not os.path.exists('/var/lib/scs-docker/%s' % identLocal):
+  os.mkdir('/var/lib/scs-docker/%s' % identLocal, 0700)
 
-if os.path.exists('/var/lib/scs-docker/%s/state.json' % installname):
-  pstate = simplejson.load(open('/var/lib/scs-docker/%s/state.json' % installname, 'r'))
+if os.path.exists('/var/lib/scs-docker/%s/run.json' % identLocal):
+  config_stateful = simplejson.load(open('/var/lib/scs-docker/%s/run.json' % identLocal, 'r'))
 else:
-  pstate = {}
+  config_stateful = {}
 
-if 'docker' not in pstate:
-  pstate['docker'] = {}
-if 'volumes' not in pstate:
-  pstate['volumes'] = {}
-if 'requires' not in pstate:
-  pstate['requires'] = {}
+if 'docker' not in config_stateful:
+  config_stateful['docker'] = {}
+if 'volumes' not in config_stateful:
+  config_stateful['volumes'] = {}
+if 'requires' not in config_stateful:
+  config_stateful['requires'] = {}
 
-pstate['docker']['image'] = uid
+config_stateful['source']['reference'] = realref
+config_stateful['docker']['image'] = identFriendly
+config_stateful['name'] = {
+  environment : cliargs.environment_name,
+  service : cliargs.service_name,
+  role : cliargs.role_name
+}
+config_stateful['ident'] = {
+  common : identCommon,
+  compilation : identCompilation,
+  friendly : identFriendly,
+  local : identLocal,
+}
 
 
 def excepthook(type, value, traceback):
-  writepstate()
+  writeconfig_stateful()
   sys.__excepthook__(type, value, traceback)
 
-def writepstate():
-  simplejson.dump(pstate, open('/var/lib/scs-docker/%s/state.json' % installname, 'w'))
+def writeconfig_stateful():
+  simplejson.dump(config_stateful, open('/var/lib/scs-docker/%s/run.json' % identLocal, 'w'))
 
-sys.excepthook = writepstate
+sys.excepthook = writeconfig_stateful
 
 #
 # check available volumes, if necessary
@@ -171,8 +236,8 @@ for volkey in config_runtime['volumes']:
   volmap = False
 
   # see if we're already supposed to use a volume
-  if volkey in pstate['volumes']:
-    volmap = pstate['volumes'][volkey]
+  if volkey in config_stateful['volumes']:
+    volmap = config_stateful['volumes'][volkey]
 
   if 'aws_ec2_ebs' == volval['method']:
     if False == volmap:
@@ -194,62 +259,69 @@ for volkey in config_runtime['volumes']:
           rolename = volval['options']['name']['role']
 
       subprocess.check_call(
-        'scs-docker-volumes-aws-ec2-ebs-mount -vvv --fstab --mkfs-type "%s" --aws-ebs-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
+        'scs-volume-aws-ec2-ebs-mount -vvv --fstab --mkfs-type "%s" --mkfs-args "%s" --volume-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
           (
             volval['options']['format'],
+            volval['options']['mkfs'],
             volval['options']['size'],
             config_runtime['about']['environment'],
             config_runtime['about']['service'],
             rolename,
             voldevice,
-            '/mnt/%s--%s' % ( installname, volkey )
+            '/mnt/%s--%s' % ( identLocal, volkey )
           )
           ,
         shell=True
       )
 
-      pstate['volumes'][volkey] = {}
-      pstate['volumes'][volkey]['device'] = voldevice
-      pstate['volumes'][volkey]['path'] = '/mnt/%s--%s' % ( installname, volkey )
+      config_stateful['volumes'][volkey] = {}
+      config_stateful['volumes'][volkey]['device'] = voldevice
+      config_stateful['volumes'][volkey]['path'] = '/mnt/%s--%s' % ( identLocal, volkey )
   elif 'local' == volval['method']:
     if False == volmap:
       if 'volume' in volval['options']:
-        path = '%s/%s' % ( pstate['volumes'][volval['options']['volume']]['path'], volval['options']['path'] )
+        path = '%s/%s' % ( config_stateful['volumes'][volval['options']['volume']]['path'], volval['options']['path'] )
       else:
         path = volval['options']['path']
 
       if not os.path.exists(path):
         os.mkdir(path, 0700)
 
-      pstate['volumes'][volkey] = {}
-      pstate['volumes'][volkey]['path'] = path
+      config_stateful['volumes'][volkey] = {}
+      config_stateful['volumes'][volkey]['path'] = path
   else:
     raise RuntimeError('Unexpected volume method')
 
 
 #
-# supervisor update
+# write supervisor config
 #
 
 conf = []
-conf.append('[program:%s]' % installname)
-conf.append('command = scs-docker-run --name %s %s' % ( installname, absmanifest ))
+conf.append('[program:%s]' % identLocal)
+conf.append('command = scs-docker-run %s' % '/var/lib/scs-docker/%s/run.json')
 conf.append('autorestart = true')
 conf.append('stdout_logfile = /var/log/supervisor/%(program_name)s-stdout.log')
 conf.append('stderr_logfile = /var/log/supervisor/%(program_name)s-stderr.log')
 
-open('/etc/supervisor/%s.ini' % installname, 'w').write('\n'.join(conf))
+open(cliargs.supervisor_program_conf % identLocal, 'w').write('\n'.join(conf))
 
-if cliargs.verbose > 1:
-  sys.stdout.write('updating supervisord...\n')
 
-subprocess.call(
-  [ 'supervisorctl', '-c', '/etc/supervisor/supervisord.conf', 'update' ],
-  stdout=TASK_STDOUT,
-  stderr=TASK_STDERR
-)
+#
+# supervisor control calls
+#
 
-if cliargs.verbose > 0:
-  sys.stdout.write('updated supervisord\n')
+if 'no_supervisor_control' not in cliargs:
+  if cliargs.verbose > 1:
+    sys.stdout.write('updating supervisord...\n')
 
-writepstate()
+  subprocess.check_call(
+    [ 'supervisorctl', '-c', cliargs.supervisor_conf, 'update' ],
+    stdout=TASK_STDOUT,
+    stderr=TASK_STDERR
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('updated supervisord\n')
+
+writeconfig_stateful()

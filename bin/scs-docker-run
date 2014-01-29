@@ -16,7 +16,6 @@ import signal
 
 cli = argparse.ArgumentParser(description='Run a docker image.')
 cli.add_argument('manifest', help='Local path for configuration manifest')
-cli.add_argument('--name', help='Override default name for installation')
 cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
 
 cliargs = cli.parse_args()
