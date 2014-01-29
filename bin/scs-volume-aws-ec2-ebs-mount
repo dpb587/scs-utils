@@ -189,12 +189,12 @@ if subprocess.call('/sbin/dumpe2fs %s' % ( cliargs.device ), shell=True, stdout=
   if cliargs.verbose > 1:
     sys.stdout.write('formatting disk...\n')
 
-  mkfs_opts = ''
+  mkfs_args = ''
 
-  if None != cliargs.mkfs_opts:
-    mkfs_opts = cliargs.mkfs_opts
+  if None != cliargs.mkfs_args:
+    mkfs_args = cliargs.mkfs_args
 
-  subprocess.check_call('/sbin/mkfs -t "%s" %s %s' % ( cliargs.mkfs_type, mkfs_opts, cliargs.device ), shell=True, stdout=TASK_STDOUT, stderr=TASK_STDERR)
+  subprocess.check_call('/sbin/mkfs -t "%s" %s %s' % ( cliargs.mkfs_type, mkfs_args, cliargs.device ), shell=True, stdout=TASK_STDOUT, stderr=TASK_STDERR)
 
   if cliargs.verbose > 0:
     sys.stdout.write('formatted disk (%s)\n' % cliargs.mkfs_type)

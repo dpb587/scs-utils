@@ -1,337 +1,336 @@
-#!/usr/bin/env python
+#!/usr/bin/env node
 
-import argparse
-import boto.ec2
-import datetime
-import hashlib
-import os
-import simplejson
-import string
-import subprocess
-import sys
-import time
-import urllib3
-import yaml
-import signal
+var child_process = require('child_process');
+var crypto = require('crypto');
+var fs = require('fs');
+var yaml = require('js-yaml');
 
-cli = argparse.ArgumentParser(description='Run a docker image.')
-cli.add_argument('manifest', help='Local path for configuration manifest')
-cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+var cli = new (require('argparse').ArgumentParser)(
+  {
+    description : 'Run an SCS container.'
+  }
+);
 
-cliargs = cli.parse_args()
+cli.addArgument([ 'manifest' ], { help : 'Local path to configuration file' })
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 
-#
-# setup our basics
-#
+var cliargs = cli.parseArgs();
 
-http = urllib3.PoolManager()
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
 
-DEVNULL = open(os.devnull, 'w')
+logger.silly('args', JSON.stringify(cliargs));
 
-if cliargs.verbose > 2:
-  TASK_STDOUT = sys.stdout
-  TASK_STDERR = sys.stderr
-else:
-  TASK_STDOUT = DEVNULL
-  TASK_STDERR = DEVNULL
+config_stateful = JSON.parse(fs.readFileSync(cliargs.manifest, { encoding : 'utf8' }));
+config_definition = yaml.safeLoad(fs.readFileSync('/var/lib/docker/aufs/mnt/' + config_stateful['docker']['image'] + '/scs/scs/manifest.yaml', { encoding : 'utf8' }));
+config_runtime = yaml.safeLoad(fs.readFileSync('/var/lib/scs-docker/' + config_stateful['ident']['local'] + '/manifest.yaml', { encoding : 'utf8' }));
 
+var etcd = new (require('node-etcd'))(config_stateful['etcd'][0], config_stateful['etcd'][1] || 4001);
 
-#
-# load configuration
-#
+var env = {
+  SCS_ENVIRONMENT : config_stateful['name']['environment'],
+  SCS_SERVICE : config_stateful['name']['service'],
+  SCS_ROLE : config_stateful['name']['role'],
+  SCS_RUN_ZONE : config_stateful['zone']
+}
 
-config_runtime = yaml.safe_load(open(cliargs.manifest, 'r').read())
-
-
-#
-# identifiers
-#
-
-if 'git' == config_runtime['source']['type']:
-  if 'reference' in config_runtime['source']:
-    niceref = config_runtime['source']['reference']
-  else:
-    niceref = 'master'
-
-  if 40 != len(niceref):
-    p = subprocess.Popen(
-      'git ls-remote "%s" | grep -E \'refs/(heads|tags)/%s\' | awk \'{ print $1 }\'' % ( config_runtime['source']['url'], niceref ),
-      shell=True,
-      stdout=subprocess.PIPE
-    )
-
-    if 0 < p.returncode:
-      raise RuntimeError('Unable to resolve source reference.')
-
-    realref = p.stdout.read().strip()
-else:
-  raise RuntimeError('Unexpected source type.')
-
-
-nid = '%s--%s--%s' % (
-  config_runtime['about']['environment'],
-  config_runtime['about']['service'],
-  config_runtime['about']['role'],
-)
-rid = hashlib.md5('%s\n%s\n%s\n%s\n%s' % ( nid, realref, yaml.dump(config_runtime['about']), yaml.dump(config_runtime['source']), yaml.dump(config_runtime['config']) )).hexdigest()
-uid = '%s--%s' % ( nid, rid[:12] )
-
-if cliargs.name:
-  installname = cliargs.name
-else:
-  installname = 'scs-%s' % nid
-
-
-#
-# load image definition
-#
-
-p = subprocess.Popen(
-  'docker inspect -format "{{.id}}" %s' % uid,
-  shell=True,
-  stdout=subprocess.PIPE
-)
-
-if 0 < p.returncode:
-  raise RuntimeError('Unable to inspect the expected image.')
-
-imageid = p.stdout.read().strip()
-
-config_definition = yaml.safe_load(open('/var/lib/docker/aufs/mnt/%s/scs/scs/manifest.yaml' % imageid, 'r').read())
-
-
-#
-# load previous state
-#
-
-pstate = simplejson.load(open('/var/lib/scs-docker/%s/state.json' % installname, 'r'))
-
-
-#
-# figure out some terms
-#
-
-os.environ['SCS_ENVIRONMENT'] = config_runtime['about']['environment']
-os.environ['SCS_SERVICE'] = config_runtime['about']['service']
-os.environ['SCS_ROLE'] = config_runtime['about']['role']
-os.environ['SCS_RUN_ZONE'] = 'aws-use1d'
-
-# lookup hostname
-p = subprocess.Popen(
+child_process.exec(
   'hostname',
-  shell=True,
-  stdout=subprocess.PIPE
-)
+  function (error, stdout, stderr) {
+    if (error) throw error;
 
-os.environ['SCS_RUN_HOST'] = p.stdout.read().strip()
+    env.SCS_RUN_HOST = stdout.trim();
 
-# lookup eth0
-p = subprocess.Popen(
+    mainReady();
+  }
+);
+
+child_process.exec(
   'hostname -I | awk \'{ print $1 }\'',
-  shell=True,
-  stdout=subprocess.PIPE
-)
+  function (error, stdout, stderr) {
+    if (error) throw error;
 
-os.environ['SCS_RUN_ADDR'] = p.stdout.read().strip()
+    env.SCS_RUN_ADDR = stdout.trim();
 
-# generate run name
-os.environ['SCS_RUN_NAME'] = hashlib.md5('%s\n%s\n%s' % ( uid, installname, os.environ['SCS_RUN_HOST'] )).hexdigest()[:12]
+    mainReady();
+  }
+);
 
-#
-# build or docker command
-#
+var container;
+var containerid;
+var endpoints = {};
+var watchers = {};
+var discoveries = {};
+var dockerargs = [
+  'run',
+  '-cidfile', '/var/lib/scs-docker/' + config_stateful['ident']['local'] + '/container'
+];
 
-etcdwatch_map = {}
-requires = {}
+function parseEndpoint(str) {
+  Object.keys(env).forEach(
+    function (key) {
+      str = str.replace('%(' + key + ')s', env[key]);
+    }
+  );
 
-def lookup_requires_etcd_watch(cluster, path):
-  val = simplejson.loads(http.request('GET', 'http://%s/v2/keys/%s?recursive=true' % ( cluster, path % os.environ )).data)
+  return str;
+}
 
-  if 'errorCode' in val:
-    raise RuntimeError('etcd error: %s' % val['message'])
-  elif 'nodes' not in val['node']:
-    return None
-  elif 0 == len(val['node']['nodes']):
-    raise RuntimeError('Unable to resolve requirement')
+function updateRequiredEndpoint(key, data) {
+  if (!('nodes' in data['node'])) {
+    data['node']['nodes'] = [ { 'value' : '127.0.0.1:1' } ];
+    //throw new Error('No endpoint found for ' + key);
+  }
 
-  return val['node']['nodes'][0]['value']
+  var endpoint = data['node']['nodes'][0]['value'];
 
-def reload_requires():
-  requires = {}
+  if (endpoint == endpoints[key]) {
+    return;
+  }
 
-  for required in config_definition['requires']:
-    req = config_runtime['requires'][required]
+  endpoints[key] = endpoint;
 
-    if 'etcd_watch' == req['method']:
-      requires[required] = lookup_requires_etcd_watch(req['options']['cluster'], req['options']['path'])
-    else:
-      raise RuntimeError('Unexpected requires method')
+  logger.info('scs/require/' + key, 'endpoint is ' + endpoints[key].split(':').slice(0, 2).join(':'));
 
-  return requires
+  if (key in discoveries) {
+    delete discoveries[key];
 
-def signal_reload_requires(sig, frame):
-  sys.stdout.write('--> received reload signal\n')
+    dockerargs.push('-e', 'SCS_REQUIRES_' + key.toUpperCase() + '=' + endpoints[key]);
 
-  newreqs = reload_requires()
+    runReady();
+  } else {
+    if ('liveupdate' in config_definition['requires'][key]) {
+      var liveenv = {};
+      liveenv['SCS_REQUIRES_' + key.toUpperCase()] = endpoints[key];
 
-  reloaded = True
+      child_process.spawn(
+        'lxc-attach',
+        [
+          '-n',
+          containerid,
+          '--keep-env',
+          config_definition['requires'][key]['liveupdate']
+        ],
+        {
+          env : liveenv,
+          timeout : 30,
+          stdio : 'inherit'
+        }
+      ).on(
+        'close',
+        function (code) {
+          if (code) {
+            logger.error('scs/require/' + key, 'live-update failed (exited ' + code + ')');
 
-  for key in newreqs:
-    if newreqs[key] != requires[key]:
-      if 'liveupdate' in config_definition['requires'][key]:
-        if subprocess.check_call('lxc-attach -n %s --keep-env %s' % ( containerid, config_definition['requires'][key]['liveupdate'] ), shell=True, env={ 'SCS_REQUIRES_%s' % key.upper() : '%s' % newreqs[key] }, stdout=TASK_STDOUT, stderr=TASK_STDERR):
-          reloaded = False
+            process.kill(process.pid, 'SIGTERM');
 
-          break
-      else:
-        reloaded = False
+            return;
+          }
 
-        break
+          logger.info('scs/require/' + key, 'live-update successful');
+        }
+      );
 
-  if False == reloaded:
-    container.terminate()
+      logger.info('scs/require/' + key, 'live-update initiated');
+    } else {
+      logger.warn('scs/require/' + key, 'live-update not supported');
 
+      process.kill(process.pid, 'SIGTERM');
+    }
+  }
+}
 
-dockerargs = [ '/usr/bin/docker' ]
-dockerargs.append('run')
-
-dockerargs.extend([ '-e', 'SCS_RUN_ZONE=%s' % os.environ['SCS_RUN_ZONE'] ])
-dockerargs.extend([ '-e', 'SCS_RUN_HOST=%s' % os.environ['SCS_RUN_HOST'] ])
-dockerargs.extend([ '-e', 'SCS_RUN_NAME=%s' % os.environ['SCS_RUN_NAME'] ])
-
-if 'provides' in config_definition:
-  for provision in config_definition['provides']:
-    dockerargs.extend([ '-p', '%s' % config_definition['provides'][provision]['port'] ])
-
-for volkey in pstate['volumes']:
-  if volkey in config_definition['volumes']:
-    dockerargs.extend([ '-v', '%s:/scs/mnt/%s' % ( pstate['volumes'][volkey]['path'], volkey ) ])
-
-if 'requires' in config_definition:
-  requires = reload_requires()
-
-  for key in requires:
-    dockerargs.extend([ '-e', 'SCS_REQUIRES_%s=%s' % ( key.upper(), requires[key] ) ])
-
-  for required in config_definition['requires']:
-    req = config_runtime['requires'][required]
-
-    if 'etcd_watch' == req['method']:
-      if req['options']['cluster'] not in etcdwatch_map:
-        etcdwatch_map[req['options']['cluster']] = []
-
-      etcdwatch_map[req['options']['cluster']].append(req['options']['path'] % os.environ)
-  
-
-dockerargs.extend([ '-cidfile', '/var/lib/scs-docker/%s/container' % installname ])
-
-dockerargs.append(uid)
-dockerargs.append('/scs/scs/bin/run')
-
-sys.stdout.write('--> %s\n' % ' '.join(dockerargs))
-
-etcdwatch_procs = {}
-
-for cluster in etcdwatch_map:
-  sys.stdout.write('--> starting watcher on %s for %s' % ( cluster, ', '.join(etcdwatch_map[cluster]) ))
-
-  args = [
-    '/usr/bin/scs-docker-run-monitor',
-    '--etcd', cluster,
-    '--notify-pid', '%s' % os.getpid(),
-    '--notify-signal', 'SIGUSR1'
-  ]
-  args.extend(etcdwatch_map[cluster])
-
-  etcdwatch_procs[cluster] = subprocess.Popen(
-    args,
-    stdout=sys.stdout,
-    stderr=sys.stderr,
-  )
-
-container = subprocess.Popen(
-  dockerargs,
-  stdout=sys.stdout,
-  stderr=sys.stderr,
-)
-
-def unregister():
-  for provides in config_definition['provides']:
-    http.request(
-      'DELETE',
-      'http://%s/v2/keys/%s/service-locator/%s/%s/%s/%s/%s-%s' % (
-        'etcd:4001',
-        os.environ['SCS_RUN_ZONE'],
-        os.environ['SCS_ENVIRONMENT'],
-        os.environ['SCS_SERVICE'],
-        os.environ['SCS_ROLE'],
-        provides,
-        os.environ['SCS_RUN_ADDR'],
-        os.environ['SCS_RUN_NAME'],
-      )
-    )
-
-    sys.stdout.write('--> unregistered %s from %s\n' % ( pubport, provides ))
-
-  isRegistered = False
-
-def forwardsig(sig, frame):
-  sys.stdout.write('--> received signal %s\n' % sig)
-
-  if sig in [ signal.SIGTERM, signal.SIGINT, signal.SIGQUIT ]:
-    unregister()
-
-  container.send_signal(sig)
-
-signal.signal(signal.SIGTERM, forwardsig)
-signal.signal(signal.SIGHUP, forwardsig)
-signal.signal(signal.SIGINT, forwardsig)
-signal.signal(signal.SIGQUIT, forwardsig)
-signal.signal(signal.SIGUSR1, signal_reload_requires)
-
-sys.stdout.write('--> watching pid %s\n' % container.pid)
-
-time.sleep(2)
-
-
-containerid = open('/var/lib/scs-docker/%s/container' % installname, 'r').read()
-
-sys.stdout.write('--> running container %s\n' % containerid)
-
-for provides in config_definition['provides']:
-  p = subprocess.Popen(
-    'docker port %s %s' % ( containerid, config_definition['provides'][provides]['port'] ),
-    shell=True,
-    stdout=subprocess.PIPE
-  )
-
-  pubport = p.stdout.read().strip().replace('0.0.0.0:', '%s:' % os.environ['SCS_RUN_ADDR'])
-
-  http.request_encode_body(
-    'PUT',
-    'http://%s/v2/keys/%s/service-locator/%s/%s/%s/%s/%s-%s' % (
-      'etcd:4001',
-      os.environ['SCS_RUN_ZONE'],
-      os.environ['SCS_ENVIRONMENT'],
-      os.environ['SCS_SERVICE'],
-      os.environ['SCS_ROLE'],
-      provides,
-      os.environ['SCS_RUN_ADDR'],
-      os.environ['SCS_RUN_NAME'],
-    ),
+function reloadRequiredEndpoint(key) {
+  return etcd.get(
+    parseEndpoint(config_runtime['requires'][key]['options']['path']),
     {
-      'value' : pubport,
+      recursive : true
     },
-    encode_multipart = False
-  )
+    function (err, data) {
+      logger.silly('scs/require/' + key, JSON.stringify(data));
 
-  sys.stdout.write('--> registered %s to %s\n' % ( provides, pubport ))
+      updateRequiredEndpoint(key, data);
 
-container.wait()
+      if (!(key in watchers)) {
+        createWatcher(key)
+      }
+    }
+  );
+}
 
-for cluster in etcdwatch_procs:
-  etcdwatch_procs[cluster].terminate()
+function createWatcher(key) {
+  watchers[key] = etcd.watcher(
+    parseEndpoint(config_runtime['requires'][key]['options']['path']),
+    null,
+    {
+      recursive : true
+    }
+  );
 
-os.remove('/var/lib/scs-docker/%s/container' % installname)
+  watchers[key].on(
+    'change',
+    function (err, data) {
+      logger.silly('scs/require-watcher/' + key, JSON.stringify(data));
 
-unregister()
+      reloadRequiredEndpoint(key);
+    }
+  );
+}
+
+function mainReady() {
+  if (6 != Object.keys(env).length) {
+    return;
+  }
+
+  var hash = crypto.createHash('sha1');
+  hash.update(env.SCS_RUN_HOST + '\n');
+  hash.update(config_stateful['ident']['common'] + '\n');
+  hash.update(config_stateful['ident']['local'] + '\n');
+
+  env['SCS_RUN_NAME'] = hash.digest('hex').substr(0, 12);
+
+  dockerargs.push('-e', 'SCS_RUN_ZONE=' + env.SCS_RUN_ZONE);
+  dockerargs.push('-e', 'SCS_RUN_HOST=' + env.SCS_RUN_HOST);
+  dockerargs.push('-e', 'SCS_RUN_ADDR=' + env.SCS_RUN_ADDR);
+
+  if ('provides' in config_definition) {
+    for (var key in config_definition['provides']) {
+      dockerargs.push('-p', config_definition['provides'][key]['port']);
+    }
+  }
+
+  if ('volumes' in config_definition) {
+    for (var key in config_definition['volumes']) {
+      dockerargs.push('-v', config_stateful['volumes'][key]['path'] + ':/scs/mnt/' + key);
+    }
+  }
+
+  if ('requires' in config_definition) {
+    for (var key in config_definition['requires']) {
+      if ('etcd_watch' == config_runtime['requires'][key]['method']) {
+        discoveries[key] = reloadRequiredEndpoint(key);
+      } else {
+        throw new Error('unsupported discovery for "' + key + '"');
+      }
+    }
+  }
+
+  runReady();
+}
+
+function runReady() {
+  if (0 != Object.keys(discoveries).length) return;
+
+  dockerargs.push(config_stateful['docker']['image']);
+  dockerargs.push('/scs/scs/bin/run');
+
+  logger.verbose('docker/run', dockerargs.join(' '));
+
+  container = child_process.spawn(
+    'docker',
+    dockerargs,
+    {
+      stdio : 'inherit'
+    }
+  );
+
+  container.on(
+    'close',
+    function (code) {
+      unregisterProvisions();
+      stopWatchers();
+
+      fs.unlink(
+        '/var/lib/scs-docker/' + config_stateful['ident']['local'] + '/container',
+        function () {
+          logger.verbose('scs/docker', 'removed container file');
+        }
+      );
+    }
+  );
+
+  setTimeout(
+    function () {
+      containerid = fs.readFileSync('/var/lib/scs-docker/' + config_stateful['ident']['local'] + '/container', { encoding : 'utf8' })
+
+      registerProvisions();
+    },
+    5000
+  );
+}
+
+var registered = {};
+
+function registerProvisions() {
+  if (!('provides' in config_definition)) return;
+
+  for (var key in config_definition['provides']) {
+    child_process.exec(
+      'docker port ' + containerid + ' ' + config_definition['provides'][key]['port'],
+      function (error, stdout, stderr) {
+        var endpoint = stdout.trim().replace('0.0.0.0:', env.SCS_RUN_ADDR + ':');
+        registered[key] = true;
+
+        etcd.set(
+          [
+            env.SCS_RUN_ZONE,
+            'service-locator',
+            env.SCS_ENVIRONMENT,
+            env.SCS_SERVICE,
+            env.SCS_ROLE,
+            key,
+            env.SCS_RUN_ADDR + '-' + env.SCS_RUN_NAME
+          ].join('/'),
+          endpoint,
+          function () {
+            logger.info('scs/provide/' + key, 'registered endpoint (' + endpoint + ')');
+          }
+        );
+      }
+    );
+  }
+}
+
+function unregisterProvisions() {
+  if (!('provides' in config_definition)) return;
+
+  for (var key in config_definition['provides']) {
+    if (!(key in registered)) continue;
+
+    delete registered[key];
+
+    etcd.del(
+      [
+        env.SCS_RUN_ZONE,
+        'service-locator',
+        env.SCS_ENVIRONMENT,
+        env.SCS_SERVICE,
+        env.SCS_ROLE,
+        key,
+        env.SCS_RUN_ADDR + '-' + env.SCS_RUN_NAME
+      ].join('/'),
+      function () {
+        logger.info('scs/provide/' + key, 'unregistered endpoint');
+      }
+    );
+  }
+}
+
+function handleSignal(signal) {
+  logger.info('scs/process', 'received ' + signal);
+
+  unregisterProvisions();
+  stopWatchers();
+  container.kill(signal);
+}
+
+function stopWatchers() {
+  for (var name in watchers) {
+    watchers[name].request.abort();
+    delete watchers[name];
+  }
+}
+
+process.on('SIGINT', function () { handleSignal('SIGINT'); });
+process.on('SIGTERM', function () { handleSignal('SIGTERM'); });
+process.on('SIGHUP', function () { handleSignal('SIGHUP'); });

@@ -5,6 +5,7 @@ import boto.ec2
 import datetime
 import hashlib
 import os
+import re
 import simplejson
 import string
 import subprocess
@@ -14,18 +15,19 @@ import urllib2
 import yaml
 
 cli = argparse.ArgumentParser(description='Deploy an SCS configuration and provision the necessary requirements. This command is idempotent.')
-cli.add_argument('environment-name', help='Environment name (e.g. prod)')
-cli.add_argument('service-name', help='Service name (e.g. public-blog)')
-cli.add_argument('role-name', help='Role name (e.g. web-wordpress)')
+cli.add_argument('environment_name', help='Environment name (e.g. prod)')
+cli.add_argument('service_name', help='Service name (e.g. public-blog)')
+cli.add_argument('role_name', help='Role name (e.g. web-wordpress)')
 cli.add_argument('manifest', help='Local path to configuration file')
-cli.add_argument('--etcd-cluster', help='The etcd cluster for service registration', default='127.0.0.1:4001', metavar='HOST[:PORT]')
+cli.add_argument('--zone', help='A delegation zone', default='default')
+cli.add_argument('--etcd', help='The etcd cluster for service registration', default='127.0.0.1:4001', metavar='HOST[:PORT]')
 cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
 cli.add_argument('--suffix-name', help='Suffix the local name (for multiple deploys)', metavar='SUFFIX')
 cli.add_argument('--no-build', help='Do not build an image if one does not already exist locally', action='store_true')
 cli.add_argument('--no-supervisor-control', help='Do not send supervisor control calls after changes', action='store_true')
 cli.add_argument('--build-args', help='Arguments to pass to scs-docker-build')
 cli.add_argument('--supervisor-control-conf', help='Path to configuration for supervisorctl control calls', default='/etc/supervisor/supervisord.conf')
-cli.add_argument('--supervisor-program-conf', help='Path to write supervisor program configuration', default='/etc/supervisor/%%s.ini')
+cli.add_argument('--supervisor-program-conf', help='Path to write supervisor program configuration', default='/etc/supervisor/%s.ini')
 cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
 
 cliargs = cli.parse_args()
@@ -95,7 +97,7 @@ identCommon = '%s--%s--%s' % (
   cliargs.role_name,
 )
 identCompilation = hashlib.md5(
-  '%s\n%s\n%s\n%s\n%s' % (
+  '%s\n%s\n%s\n%s' % (
     identCommon,
     realref,
     yaml.dump(config_runtime['source']),
@@ -120,14 +122,19 @@ p = subprocess.Popen(
   stdout=subprocess.PIPE
 )
 
+p.wait()
+
 if 0 < p.returncode:
   # seems like the image isn't here
   if cliargs.no_build:
     raise RuntimeError('Unable to inspect the expected image and was told not to build one.')
 
   # try to build one
+  if 1 < cliargs.verbose:
+    sys.stdout.write('building image...\n')
+
   subprocess.check_call(
-    'scs-docker-deploy --source-reference %s -vvv %s %s %s %s %s' % (
+    'scs-docker-build --source-reference %s -vvv %s %s %s %s %s' % (
       realref,
       cliargs.build_args,
       cliargs.environment_name,
@@ -139,6 +146,9 @@ if 0 < p.returncode:
     stdout = TASK_STDOUT,
     stderr = TASK_STDERR,
   )
+
+  if 0 < cliargs.verbose:
+    sys.stdout.write('built image\n')
 
   # try lookup again
   p = subprocess.Popen(
@@ -176,18 +186,24 @@ if 'volumes' not in config_stateful:
 if 'requires' not in config_stateful:
   config_stateful['requires'] = {}
 
-config_stateful['source']['reference'] = realref
-config_stateful['docker']['image'] = identFriendly
+config_stateful['source'] = {
+  'reference' : realref,
+}
+config_stateful['docker'] = {
+  'image' : imageid,
+}
+config_stateful['etcd'] = cliargs.etcd.split(':')
+config_stateful['zone'] = cliargs.zone
 config_stateful['name'] = {
-  environment : cliargs.environment_name,
-  service : cliargs.service_name,
-  role : cliargs.role_name
+  'environment' : cliargs.environment_name,
+  'service' : cliargs.service_name,
+  'role' : cliargs.role_name
 }
 config_stateful['ident'] = {
-  common : identCommon,
-  compilation : identCompilation,
-  friendly : identFriendly,
-  local : identLocal,
+  'common' : identCommon,
+  'compilation' : identCompilation,
+  'friendly' : identFriendly,
+  'local' : identLocal,
 }
 
 
@@ -198,7 +214,7 @@ def excepthook(type, value, traceback):
 def writeconfig_stateful():
   simplejson.dump(config_stateful, open('/var/lib/scs-docker/%s/run.json' % identLocal, 'w'))
 
-sys.excepthook = writeconfig_stateful
+sys.excepthook = excepthook
 
 #
 # check available volumes, if necessary
@@ -252,20 +268,25 @@ for volkey in config_runtime['volumes']:
       if False == voldevice:
         raise RuntimeError('No devices are available.')
 
-      rolename = '%s/%s' % ( config_runtime['about']['role'], volkey )
+      rolename = '%s/%s' % ( cliargs.role_name, volkey )
 
       if 'name' in volval['options']:
         if 'role' in volval['options']['name']:
           rolename = volval['options']['name']['role']
 
+      if 'mkfs' in volval['options']:
+        mkfs = volval['options']['mkfs']
+      else:
+        mkfs = ''
+
       subprocess.check_call(
         'scs-volume-aws-ec2-ebs-mount -vvv --fstab --mkfs-type "%s" --mkfs-args "%s" --volume-size "%s" "%s" "%s" "%s" "%s" "%s"' % \
           (
             volval['options']['format'],
-            volval['options']['mkfs'],
+            mkfs,
             volval['options']['size'],
-            config_runtime['about']['environment'],
-            config_runtime['about']['service'],
+            cliargs.environment_name,
+            cliargs.service_name,
             rolename,
             voldevice,
             '/mnt/%s--%s' % ( identLocal, volkey )
@@ -299,7 +320,7 @@ for volkey in config_runtime['volumes']:
 
 conf = []
 conf.append('[program:%s]' % identLocal)
-conf.append('command = scs-docker-run %s' % '/var/lib/scs-docker/%s/run.json')
+conf.append('command = scs-docker-run /var/lib/scs-docker/%s/run.json' % identLocal)
 conf.append('autorestart = true')
 conf.append('stdout_logfile = /var/log/supervisor/%(program_name)s-stdout.log')
 conf.append('stderr_logfile = /var/log/supervisor/%(program_name)s-stderr.log')
@@ -311,12 +332,12 @@ open(cliargs.supervisor_program_conf % identLocal, 'w').write('\n'.join(conf))
 # supervisor control calls
 #
 
-if 'no_supervisor_control' not in cliargs:
+if not cliargs.no_supervisor_control:
   if cliargs.verbose > 1:
     sys.stdout.write('updating supervisord...\n')
 
   subprocess.check_call(
-    [ 'supervisorctl', '-c', cliargs.supervisor_conf, 'update' ],
+    [ 'supervisorctl', '-c', cliargs.supervisor_control_conf, 'update' ],
     stdout=TASK_STDOUT,
     stderr=TASK_STDERR
   )

@@ -15,13 +15,14 @@ import urllib2
 import yaml
 
 cli = argparse.ArgumentParser(description='Utility for deploying a SCS image.')
-cli.add_argument('environment-name', help='Environment name (e.g. prod)')
-cli.add_argument('service-name', help='Service name (e.g. public-blog)')
-cli.add_argument('role-name', help='Role name (e.g. web-wordpress)')
+cli.add_argument('environment_name', help='Environment name (e.g. prod)')
+cli.add_argument('service_name', help='Service name (e.g. public-blog)')
+cli.add_argument('role_name', help='Role name (e.g. web-wordpress)')
 cli.add_argument('manifest', help='Local path to configuration file')
 cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
 cli.add_argument('--cache-s3-bucket', help='An S3 bucket for caching built images', metavar='BUCKET')
 cli.add_argument('--cache-s3-prefix', help='An optional prefix to use when caching built images to S3', metavar='PREFIX', default='')
+cli.add_argument('--tmppath', help='A temporary path to work from when building images', metavar='PREFIX')
 cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
 
 cliargs = cli.parse_args()
@@ -86,7 +87,7 @@ identCommon = '%s--%s--%s' % (
   cliargs.role_name,
 )
 identCompilation = hashlib.md5(
-  '%s\n%s\n%s\n%s\n%s' % (
+  '%s\n%s\n%s\n%s' % (
     identCommon,
     realref,
     yaml.dump(config_runtime['source']),
@@ -95,6 +96,10 @@ identCompilation = hashlib.md5(
 ).hexdigest()
 identFriendly = '%s--%s' % ( identCommon, identCompilation[:12] )
 
+if cliargs.tmppath:
+  tmppath = cliargs.tmppath
+else:
+  tmppath = '/tmp/%s' % identFriendly
 
 #
 # check for local copy
@@ -151,23 +156,23 @@ if not isLocal:
   #
 
   if 'git' == config_runtime['source']['type']:
-    if os.path.exists('%s/.git' % cliargs.path):
-      os.chdir(cliargs.path)
+    if os.path.exists('%s/.git' % tmppath):
+      os.chdir(tmppath)
 
       if subprocess.call([ 'git', 'diff', '--exit-code', '--quiet' ], stdout=TASK_STDOUT, stderr=TASK_STDERR):
-        raise RuntimeError('The working directory "%s" is not clean.' % cliargs.path)
+        raise RuntimeError('The working directory "%s" is not clean.' % tmppath)
 
       subprocess.check_call([ 'git', 'fetch' ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
     else:
       if cliargs.verbose > 1:
         sys.stdout.write('cloning repository...\n')
 
-      subprocess.check_call([ 'git', 'clone', config_runtime['source']['url'], cliargs.path ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
+      subprocess.check_call([ 'git', 'clone', config_runtime['source']['url'], tmppath ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
 
       if cliargs.verbose > 0:
         sys.stdout.write('cloned repository\n')
 
-    os.chdir(cliargs.path)
+    os.chdir(tmppath)
 
     if cliargs.verbose > 1:
       sys.stdout.write('checking out reference...\n')

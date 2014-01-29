@@ -22,17 +22,19 @@ cli.addArgument([ 'service' ], { help : 'service' });
 var cliargs = cli.parseArgs();
 
 cliargs.etcd = cliargs.etcd.split(':');
+cliargs.etcd[1] = parseInt(cliargs.etcd[1], 10) || 4001;
 
 var logger = require('npmlog');
 logger.level = cliargs.log_level;
 
 logger.silly('args', JSON.stringify(cliargs));
 
-var etcd = new (require('node-etcd'))(cliargs.etcd[0], cliargs.etcd[1] || 4001);
+var etcd = new (require('node-etcd'))(cliargs.etcd[0], cliargs.etcd[1]);
 
 var watchers = {};
 var forwarders = {};
 var endpoints = {};
+var reloadtimers = {};
 
 function reloadEndpoint(provide) {
   var providez = provide.split(':');
@@ -42,14 +44,13 @@ function reloadEndpoint(provide) {
     {
       recursive : true
     },
-    function (data) {
-      console.log(arguments);
+    function (err, data) {
       logger.silly(providez[0] + '/' + providez[1] + '/endpoint', JSON.stringify(data));
 
       updateForwarder(provide, data);
 
       if (!(provide in watchers)) {
-        createWatcher(provide)
+        createWatcher(provide);
       }
     }
   );
@@ -69,7 +70,6 @@ function createWatcher(provide) {
   watchers[provide].on(
     'change',
     function (data) {
-      console.log(arguments);
       logger.silly(providez[0] + '/' + providez[1] + '/watcher', JSON.stringify(data));
 
       reloadEndpoint(provide);
@@ -86,7 +86,9 @@ function updateForwarder(provide, data) {
     endpoints[provide] = null;
 
     reloadtimers[provide] = setTimeout(
-      reloadEndpoint,
+      function () {
+        reloadEndpoint(provide);
+      },
       10000
     );
 
@@ -95,17 +97,23 @@ function updateForwarder(provide, data) {
 
   clearTimeout(reloadtimers[provide]);
 
-  var endpoint = data['node']['nodes'][0]['value'].split(':');
+  var endpoint = data['node']['nodes'][0]['value'];
 
-  if ((!(provide in endpoints)) || (endpoint[0] != endpoints[provide][0]) || (endpoint[1] != endpoints[provide][1])) {
-    logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'endpoint is ' + forwarders[provide].endpoint.slice(0, 2).join(':') + ' -> ' + endpoint.slice(0, 2).join(':'));
+  if (endpoint == endpoints[provide]) {
+    return;
   }
 
-  endpoints[provide] = endpoint;
+  endpoints[provide] = endpoint.split(':');
+
+  logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'endpoint is ' + endpoints[provide].slice(0, 2).join(':'));
+
+  if (provide in forwarders) {
+    return;
+  }
 
   forwarders[provide] = net.createServer(
     function (from) {
-      logger.verbose(providez[0] + '/' + providez[1], '/forwarder', 'connection ' + from.remoteAddress + ':' + from.remotePort + ' -> ' + endpoints[provide][0] + ':' + endpoints[provide][1]);
+      logger.verbose(providez[0] + '/' + providez[1] + '/forwarder', 'connection ' + from.remoteAddress + ':' + from.remotePort + ' -> ' + endpoints[provide][0] + ':' + endpoints[provide][1]);
 
       var to = net.createConnection(
         {
@@ -129,13 +137,13 @@ function updateForwarder(provide, data) {
     .on(
       'listening',
       function () {
-        logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'started on port ' + providez[2]);
+        logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'started');
       }
     )
     .on(
       'close',
       function () {
-        logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'stopped  ' + cliargs.ip + ':' + providez[2]);
+        logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'stopped');
       }
     )
     ;
@@ -147,15 +155,17 @@ function stop() {
 
     logger.verbose(providez[0] + '/' + providez[1] + '/forwarder', 'stopping');
 
-    forwarders[provide].server.close();
+    forwarders[provide].close();
+
+    delete forwarders[provide];
   }
 
   for (var provide in watchers) {
     var providez = provide.split(':');
 
-    logger.verbose(providez[0] + '/' + providez[1] + '/watcher', 'aborting');
+    logger.verbose(providez[0] + '/' + providez[1] + '/watcher', 'stopping');
 
-    //watchers[provide].abort();
+    watchers[provide].request.abort();
   }
 }
 
