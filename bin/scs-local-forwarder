@@ -12,7 +12,7 @@ var cli = new (require('argparse').ArgumentParser)(
 
 cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 cli.addArgument([ '--provide' ], { help : 'tunnel a provided protocol', action : 'append', required : true, metavar : 'ROLE:PROVIDER:LOCALPORT' });
-cli.addArgument([ '--host' ], { help : 'local hostname', required : true });
+cli.addArgument([ '--host' ], { help : 'local hostname' });
 cli.addArgument([ '--ip' ], { help : 'local ip', required : true });
 cli.addArgument([ 'etcd' ], { help : 'etcd cluster', metavar : 'HOST:PORT' });
 cli.addArgument([ 'zone' ], { help : 'zone' });
@@ -239,22 +239,26 @@ function stop() {
   }
 }
 
-child_process.exec(
-  '/sbin/ifconfig lo0 alias ' + cliargs.ip + ' && (/usr/bin/grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || /bin/echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)',
-  function (err, stdout, stderr) {
-    logger.silly('localhost:stdout', stdout);
-    logger.silly('localhost:stderr', stderr);
-    logger.silly('localhost:code', err ? err.code : 0);
+if (cliargs.host) {
+  child_process.exec(
+    '/sbin/ifconfig lo0 alias ' + cliargs.ip + ' && (/usr/bin/grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || /bin/echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)',
+    function (err, stdout, stderr) {
+      logger.silly('localhost:stdout', stdout);
+      logger.silly('localhost:stderr', stderr);
+      logger.silly('localhost:code', err ? err.code : 0);
 
-    if (err) {
-      throw new Error('Unable to route');
+      if (err) {
+        throw new Error('Unable to route');
+      }
+
+      logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
+
+      cliargs.provide.forEach(reloadForwarderEndpoint);
     }
-
-    logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
-
-    cliargs.provide.forEach(reloadForwarderEndpoint);
-  }
-);
+  );
+} else {
+  cliargs.provide.forEach(reloadForwarderEndpoint);
+}
 
 process
   .on(
