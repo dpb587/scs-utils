@@ -19,9 +19,10 @@ var cliargs = cli.parseArgs();
 cliargs.etcd = cliargs.etcd.split(':', 2);
 
 var logger = require('npmlog');
-logger.level = cliargs.logLevel;
+logger.level = cliargs.log_level;
 
 logger.silly('args', JSON.stringify(cliargs));
+
 
 var notifyTimeout;
 
@@ -59,7 +60,7 @@ function watchPath(path) {
       res.on(
         'data',
         function (chunk) {
-          logger.warn(path, chunk);
+          logger.info(path, chunk);
 
           queueNotify();
         }
@@ -76,7 +77,7 @@ function watchPath(path) {
   );
 
   req.setTimeout(
-    120000,
+    600000,
     function () {
       timedout = true;
 
@@ -96,7 +97,7 @@ function watchPath(path) {
         return;
       }
 
-      logger.warn(path, 'Error: ' + err.message);
+      logger.error(path, 'Error: ' + err.message);
 
       delete requests[path];
 

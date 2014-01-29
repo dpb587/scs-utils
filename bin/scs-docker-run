@@ -148,10 +148,6 @@ requires = {}
 def lookup_requires_etcd_watch(cluster, path):
   val = simplejson.loads(http.request('GET', 'http://%s/v2/keys/%s?recursive=true' % ( cluster, path % os.environ )).data)
 
-  if 1 < cliargs.verbose:
-    simplejson.dump(val, sys.stdout)
-    sys.stdout.write('\n')
-
   if 'errorCode' in val:
     raise RuntimeError('etcd error: %s' % val['message'])
   elif 'nodes' not in val['node']:
@@ -179,21 +175,21 @@ def signal_reload_requires(sig, frame):
 
   newreqs = reload_requires()
 
-  clean = True
+  reloaded = True
 
   for key in newreqs:
     if newreqs[key] != requires[key]:
       if 'liveupdate' in config_definition['requires'][key]:
         if subprocess.check_call('lxc-attach -n %s --keep-env %s' % ( containerid, config_definition['requires'][key]['liveupdate'] ), shell=True, env={ 'SCS_REQUIRES_%s' % key.upper() : '%s' % newreqs[key] }, stdout=TASK_STDOUT, stderr=TASK_STDERR):
-          clean = False
+          reloaded = False
 
           break
       else:
-        clean = False
+        reloaded = False
 
         break
 
-  if False == clean:
+  if False == reloaded:
     container.terminate()
 
 

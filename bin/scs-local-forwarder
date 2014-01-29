@@ -1,0 +1,276 @@
+#!/usr/bin/env node
+
+var http = require('http');
+var net = require('net');
+var child_process = require('child_process');
+
+var cli = new (require('argparse').ArgumentParser)(
+  {
+    description : 'Create a dynamic forwarding agent for etcd-based service discovery.'
+  }
+);
+
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+cli.addArgument([ '--provide' ], { help : 'tunnel a provided protocol', action : 'append', required : true, metavar : 'ROLE:PROVIDER:LOCALPORT' });
+cli.addArgument([ '--host' ], { help : 'local hostname', required : true });
+cli.addArgument([ '--ip' ], { help : 'local ip', required : true });
+cli.addArgument([ 'etcd' ], { help : 'etcd cluster', metavar : 'HOST:PORT' });
+cli.addArgument([ 'zone' ], { help : 'zone' });
+cli.addArgument([ 'environment' ], { help : 'environment' });
+cli.addArgument([ 'service' ], { help : 'service' });
+
+var cliargs = cli.parseArgs();
+
+cliargs.etcd = cliargs.etcd.split(':');
+
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
+
+logger.silly('args', JSON.stringify(cliargs));
+
+var isShuttingDown = false;
+
+var reloadtimers = {};
+var forwarders = {};
+var watchers = {};
+
+function createForwarder(provide, json) {
+  var providez = provide.split(':');
+
+  logger.silly(providez[0] + '/' + providez[1] + '/forwarder', JSON.stringify(json));
+
+  if (!('nodes' in json['node'])) {
+    logger.error(providez[0] + '/' + providez[1] + '/forwarder', 'unable to discover endpoint; retrying in 10s...');
+
+    reloadtimers[provide] = setTimeout(
+      function () {
+        reloadForwarderEndpoint(provide);
+      },
+      10000
+    );
+
+    return;
+  }
+
+  clearTimeout(reloadtimers[provide]);
+
+  var endpoint = json['node']['nodes'][0]['value'].split(':');
+
+  if (provide in forwarders) {
+    if (endpoint[0] == forwarders[provide].endpoint[0] && endpoint[1] == forwarders[provide].endpoint[1]) {
+      return;
+    }
+
+    logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'endpoint changing ' + forwarders[provide].endpoint.slice(0, 2).join(':') + ' -> ' + endpoint.slice(0, 2).join(':'));
+
+    forwarders[provide].server.close();
+
+    delete forwarders[provide].server;
+  }
+
+  forwarders[provide] = {};
+  forwarders[provide].endpoint = endpoint;
+  forwarders[provide].server = net.createServer(
+    function (from) {
+      var to = net.createConnection(
+        {
+          host : endpoint[0],
+          port : endpoint[1]
+        }
+      )
+        .on(
+          'error',
+          function (err) {
+            logger.error(providez[0] + '/' + providez[1] + '/forwarder', err.message);
+          }
+        )
+        ;
+
+      from.pipe(to);
+      to.pipe(from);
+    }
+  )
+    .listen(parseInt(providez[2], 10), cliargs.ip)
+    .on(
+      'listening',
+      function () {
+        logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'started ' + cliargs.ip + ':' + providez[2] + ' -> ' + endpoint[0] + ':' + endpoint[1]);
+      }
+    )
+    .on(
+      'close',
+      function () {
+        logger.info(providez[0] + '/' + providez[1] + '/forwarder', 'stopped ' + cliargs.ip + ':' + providez[2] + ' -> ' + endpoint[0] + ':' + endpoint[1]);
+      }
+    )
+    ;
+}
+
+function createWatcher(provide) {
+  var providez = provide.split(':');
+  var isTimingOut = false;
+
+  var data = [];
+
+  watchers[provide] = http.request(
+    {
+      host : cliargs.etcd[0],
+      port : cliargs.etcd[1],
+      path : '/v2/keys/' + cliargs.zone + '/service-locator/' + cliargs.environment + '/' + cliargs.service + '/' + providez[0] + '/' + providez[1] + '?recursive=true&wait=true'
+    },
+    function (res) {
+      res.setEncoding('utf8');
+      res
+        .on(
+          'data',
+          function (chunk) {
+            data.push(chunk);
+          }
+        )
+        .on(
+          'end',
+          function () {
+            logger.silly(providez[0] + '/' + providez[1] + '/watcher', 'response received');
+
+            delete watchers[provide];
+
+            if (0 < data.length) {
+              reloadForwarderEndpoint(provide);
+
+              return;
+            }
+
+            createWatcher(provide);
+          }
+        )
+        ;
+    }
+  );
+
+  watchers[provide].setTimeout(
+    600000,
+    function () {
+      isTimingOut = true;
+
+      this.end();
+      req.abort();
+
+      delete watchers[provide];
+
+      createWatcher(path);
+    }
+  );
+
+  watchers[provide]
+    .on(
+      'error',
+      function (err) {
+        if (isShuttingDown || isTimingOut) {
+          return;
+        }
+
+        logger.error(providez[0] + '/' + providez[1] + '/watcher', 'Error: ' + err.message);
+
+        delete requests[path];
+
+        setTimeout(
+          function () {
+            createWatcher(path);
+          },
+          10000
+        );
+      }
+    )
+    .end()
+    ;
+
+  logger.silly(providez[0] + '/' + providez[1] + '/watcher', 'request sent');
+}
+
+function reloadForwarderEndpoint(provide) {
+  var providez = provide.split(':');
+
+  var data = [];
+  var req = http.request(
+    {
+      host : cliargs.etcd[0],
+      port : cliargs.etcd[1],
+      path : '/v2/keys/' + cliargs.zone + '/service-locator/' + cliargs.environment + '/' + cliargs.service + '/' + providez[0] + '/' + providez[1] + '?recursive=true'
+    },
+    function (res) {
+      res.setEncoding('utf8');
+      res
+        .on(
+          'data',
+          function (chunk) {
+            data.push(chunk);
+          }
+        )
+        .on(
+          'end',
+          function () {
+            createForwarder(provide, JSON.parse(data));
+            createWatcher(provide);
+          }
+        )
+        ;
+    }
+  );
+  req.end();
+}
+
+function stop() {
+  isShuttingDown = true;
+
+  for (var provide in forwarders) {
+    var providez = provide.split(':');
+
+    logger.verbose(providez[0] + '/' + providez[1] + '/forwarder', 'stopping');
+
+    forwarders[provide].server.close();
+  }
+
+  for (var provide in watchers) {
+    var providez = provide.split(':');
+
+    logger.verbose(providez[0] + '/' + providez[1] + '/watcher', 'aborting');
+
+    watchers[provide].abort();
+  }
+}
+
+child_process.exec(
+  '/sbin/ifconfig lo0 alias ' + cliargs.ip + ' && (/usr/bin/grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || /bin/echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)',
+  function (err, stdout, stderr) {
+    logger.silly('localhost:stdout', stdout);
+    logger.silly('localhost:stderr', stderr);
+    logger.silly('localhost:code', err ? err.code : 0);
+
+    if (err) {
+      throw new Error('Unable to route');
+    }
+
+    logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
+
+    cliargs.provide.forEach(reloadForwarderEndpoint);
+  }
+);
+
+process
+  .on(
+    'SIGINT',
+    function () {
+      logger.info('process', 'received SIGINT');
+
+      stop();
+    }
+  )
+  .on(
+    'SIGTERM',
+    function () {
+      logger.info('process', 'received SIGTERM');
+
+      stop();
+    }
+  )
+  ;
