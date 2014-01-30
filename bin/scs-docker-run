@@ -326,7 +326,7 @@ function handleSignal(signal) {
 
 function stopWatchers() {
   for (var name in watchers) {
-    watchers[name].request.abort();
+    watchers[name].stop();
     delete watchers[name];
   }
 }

@@ -26,6 +26,7 @@ pushd /usr/local/scs-utils
 wget -O- https://github.com/dpb587/scs-docker-utils/archive/master.tar.gz | tar -xz --strip-components 1
 pip install --upgrade -r requirements.txt
 npm install
+( cd node_modules/node-etcd/ && npm install && npm run-script build )
 ln -s $PWD/bin/* /usr/bin/
 popd
 
