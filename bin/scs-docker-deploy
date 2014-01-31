@@ -83,6 +83,9 @@ if 'git' == config_runtime['source']['type']:
     realref = p.stdout.read().strip()
   else:
     realref = niceref
+
+  if 0 == len(realref):
+    raise RuntimeError('Unable to resolve source reference "%s".' % niceref)
 else:
   raise RuntimeError('Unexpected source type.')
 

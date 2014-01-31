@@ -80,7 +80,7 @@ function createWatcher(provide) {
 function updateForwarder(provide, data) {
   var providez = provide.split(':');
 
-  if (!('nodes' in data['node'])) {
+  if (!('node' in data) || !('nodes' in data['node'])) {
     logger.error(providez[0] + '/' + providez[1] + '/forwarder', 'unable to discover endpoint; retrying in 10s...');
 
     endpoints[provide] = null;
@@ -166,6 +166,10 @@ function stop() {
     logger.verbose(providez[0] + '/' + providez[1] + '/watcher', 'stopping');
 
     watchers[provide].request.abort();
+  }
+
+  for (var provide in reloadtimers) {
+    clearTimeout(reloadtimers[provide]);
   }
 }
 
