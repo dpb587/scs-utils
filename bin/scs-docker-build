@@ -20,6 +20,8 @@ cli.add_argument('service_name', help='Service name (e.g. public-blog)')
 cli.add_argument('role_name', help='Role name (e.g. web-wordpress)')
 cli.add_argument('manifest', help='Local path to configuration file')
 cli.add_argument('--dev', help='Build a development container', action='store_true')
+cli.add_argument('--provision-pre', help='A provisioning step to perform before the standard commands', action='append')
+cli.add_argument('--provision-post', help='A provisioning step to perform after the standard commands', action='append')
 cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
 cli.add_argument('--cache-s3-bucket', help='An S3 bucket for caching built images', metavar='BUCKET')
 cli.add_argument('--cache-s3-prefix', help='An optional prefix to use when caching built images to S3', metavar='PREFIX', default='')
@@ -74,7 +76,7 @@ if 'git' == config_runtime['source']['type']:
   else:
     realref = niceref
 elif 'local' == config_runtime['source']['type']:
-  niceref = cliargs.source_reference
+  niceref = os.path.abspath(cliargs.source_reference)
   realref = niceref
   cliargs.tmppath = niceref
 else:
@@ -247,6 +249,10 @@ if not isLocal:
 
   buildfile.append('#!/bin/bash')
   buildfile.append('set -e')
+
+  if cliargs.provision_pre:
+    buildfile.extend(cliargs.provision_pre)
+
   buildfile.append('/bin/echo "deb http://archive.ubuntu.com/ubuntu/ precise universe" >> /etc/apt/sources.list')
   buildfile.append('/usr/bin/apt-get update')
   buildfile.append('/usr/bin/apt-get -y install wget ca-certificates')
@@ -263,7 +269,11 @@ if not isLocal:
   buildfile.append('/usr/bin/apt-get -y autoremove --purge')
   buildfile.append('/usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
 
+  if cliargs.provision_post:
+    buildfile.extend(cliargs.provision_post)
+
   open('scs/runtime/provision.sh', 'w').write('\n'.join(buildfile))
+  os.chmod('scs/runtime/provision.sh', 0755)
 
   #
   # generate Dockerfile
@@ -326,7 +336,7 @@ if not isLocal:
   dockerargs.append('/scs/scs/runtime/provision.sh')
 
   subprocess.check_call(
-    'docker run -name %s-builder -rm -t "%s" .' % identFriendly,
+    ' '.join(dockerargs),
     shell=True,
     stdout=TASK_STDOUT,
     stderr=TASK_STDERR,

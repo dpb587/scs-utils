@@ -332,6 +332,13 @@ for volkey in config_runtime['volumes']:
 
 
 #
+# archive manifest
+#
+
+open('/var/lib/scs-docker/%s/manifest.yaml' % identLocal, 'w').write(open(absmanifest, 'r').read())
+
+
+#
 # write supervisor config
 #
 
