@@ -2,7 +2,7 @@
     "dependencies" : {
         "argparse" : "*",
         "npmlog" : "0.0.6",
-        "node-etcd" : "git://github.com/dpb587/node-etcd.git#add-watcher-stop",
+        "node-etcd" : "2.0.8",
         "js-yaml" : "3.0.1"
     }
 }
