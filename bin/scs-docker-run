@@ -282,6 +282,9 @@ function registerProvisions() {
             env.SCS_RUN_ADDR + '-' + env.SCS_RUN_NAME
           ].join('/'),
           endpoint,
+          {
+            ttl : 480
+          },
           function () {
             logger.info('scs/provide/' + key, 'registered endpoint (' + endpoint + ')');
           }
@@ -289,6 +292,8 @@ function registerProvisions() {
       }
     );
   }
+
+  setTimeout(registerProvisions, 300000);
 }
 
 function unregisterProvisions() {
