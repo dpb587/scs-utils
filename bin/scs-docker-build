@@ -19,6 +19,7 @@ cli.add_argument('environment_name', help='Environment name (e.g. prod)')
 cli.add_argument('service_name', help='Service name (e.g. public-blog)')
 cli.add_argument('role_name', help='Role name (e.g. web-wordpress)')
 cli.add_argument('manifest', help='Local path to configuration file')
+cli.add_argument('--dev', help='Build a development container', action='store_true')
 cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
 cli.add_argument('--cache-s3-bucket', help='An S3 bucket for caching built images', metavar='BUCKET')
 cli.add_argument('--cache-s3-prefix', help='An optional prefix to use when caching built images to S3', metavar='PREFIX', default='')
@@ -32,8 +33,6 @@ cliargs = cli.parse_args()
 # setup our basics
 #
 
-s3api = boto.connect_s3()
-
 DEVNULL = open(os.devnull, 'w')
 
 if cliargs.verbose > 2:
@@ -44,6 +43,7 @@ else:
   TASK_STDERR = DEVNULL
 
 if cliargs.cache_s3_bucket:
+  s3api = boto.connect_s3()
   s3cache = s3api.get_bucket(cliargs.cache_s3_bucket)
 else:
   s3cache = False
@@ -73,6 +73,10 @@ if 'git' == config_runtime['source']['type']:
     realref = cliargs.source_reference
   else:
     realref = niceref
+elif 'local' == config_runtime['source']['type']:
+  niceref = cliargs.source_reference
+  realref = niceref
+  cliargs.tmppath = niceref
 else:
   raise RuntimeError('Unexpected source type.')
 
@@ -180,6 +184,10 @@ if not isLocal:
     subprocess.check_call([ 'git', 'checkout', realref ], stdout=TASK_STDOUT, stderr=TASK_STDERR)
 
     sys.stdout.write('checked out reference\n')
+  elif 'local' == config_runtime['source']['type']:
+    sys.stdout.write('using local directory: %s\n' % tmppath)
+
+    os.chdir(tmppath)
   else:
     raise RuntimeError('Unexpected source type')
 
@@ -205,37 +213,7 @@ if not isLocal:
 
 
   #
-  # generate Dockerfile
-  #
-
-  dockerfile = []
-
-  dockerfile.append('FROM %s' % config_definition['docker']['from'])
-  dockerfile.append('RUN /bin/echo "deb http://archive.ubuntu.com/ubuntu/ precise universe" >> /etc/apt/sources.list && /usr/bin/apt-get update && /usr/bin/apt-get install -y wget ca-certificates && /usr/bin/wget https://apt.puppetlabs.com/puppetlabs-release-precise.deb && /usr/bin/dpkg -i puppetlabs-release-precise.deb && /bin/rm puppetlabs-release-precise.deb && /usr/bin/apt-get update && /usr/bin/apt-get install -y puppet && /usr/bin/puppet module install puppetlabs/stdlib && /usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
-  dockerfile.append('ADD . /scs')
-  dockerfile.append('ENV SCS_ENVIRONMENT %s' % cliargs.environment_name)
-  dockerfile.append('ENV SCS_SERVICE %s' % cliargs.service_name)
-  dockerfile.append('ENV SCS_ROLE %s' % cliargs.role_name)
-  dockerfile.append('RUN /usr/bin/puppet apply --modulepath=/scs/scs/puppet:/etc/puppet/modules:/usr/share/puppet/modules /scs/scs/runtime/puppet.pp')
-  dockerfile.append('RUN /usr/bin/apt-get -y remove --purge puppet && /usr/bin/apt-get -y autoremove --purge && /usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
-
-  if 'volumes' in config_definition:
-    for volume in config_definition['volumes']:
-      dockerfile.append('VOLUME /scs/mnt/%s' % volume)
-
-  if 'provides' in config_definition:
-    for provision in config_definition['provides']:
-      dockerfile.append('EXPOSE %s' % config_definition['provides'][provision]['port'])
-
-  dockerfile.append('EXPOSE 9001')
-
-  dockerfile.append('ENTRYPOINT [ "/scs/scs/bin/run" ]')
-
-  open('Dockerfile', 'w').write('\n'.join(dockerfile))
-
-
-  #
-  # generate puppet
+  # generate puppet file
   #
 
   puppetfile = [
@@ -262,21 +240,114 @@ if not isLocal:
 
 
   #
+  # generate provision script
+  #
+
+  buildfile = []
+
+  buildfile.append('#!/bin/bash')
+  buildfile.append('set -e')
+  buildfile.append('/bin/echo "deb http://archive.ubuntu.com/ubuntu/ precise universe" >> /etc/apt/sources.list')
+  buildfile.append('/usr/bin/apt-get update')
+  buildfile.append('/usr/bin/apt-get -y install wget ca-certificates')
+  buildfile.append('/usr/bin/wget https://apt.puppetlabs.com/puppetlabs-release-precise.deb')
+  buildfile.append('/usr/bin/dpkg -i puppetlabs-release-precise.deb')
+  buildfile.append('/bin/rm puppetlabs-release-precise.deb')
+  buildfile.append('/usr/bin/apt-get update')
+  buildfile.append('/usr/bin/apt-get -y install puppet')
+  buildfile.append('/usr/bin/puppet module install puppetlabs/stdlib')
+
+  buildfile.append('/usr/bin/puppet apply --modulepath=/scs/scs/puppet:/etc/puppet/modules:/usr/share/puppet/modules /scs/scs/runtime/puppet.pp')
+
+  buildfile.append('/usr/bin/apt-get -y remove --purge puppet')
+  buildfile.append('/usr/bin/apt-get -y autoremove --purge')
+  buildfile.append('/usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')
+
+  open('scs/runtime/provision.sh', 'w').write('\n'.join(buildfile))
+
+  #
+  # generate Dockerfile
+  #
+
+  dockerfile = []
+
+  dockerfile.append('FROM %s' % config_definition['docker']['from'])
+
+  dockerfile.append('ENV SCS_ENVIRONMENT %s' % cliargs.environment_name)
+  dockerfile.append('ENV SCS_SERVICE %s' % cliargs.service_name)
+  dockerfile.append('ENV SCS_ROLE %s' % cliargs.role_name)
+
+  if cliargs.dev:
+    dockerfile.append('VOLUME /scs')
+  else:
+    dockerfile.append('ADD . /scs')
+
+  if 'volumes' in config_definition:
+    for volume in config_definition['volumes']:
+      dockerfile.append('VOLUME /scs-mnt/%s' % volume)
+
+  if 'provides' in config_definition:
+    for provision in config_definition['provides']:
+      dockerfile.append('EXPOSE %s' % config_definition['provides'][provision]['port'])
+
+  dockerfile.append('EXPOSE 9001')
+
+  open('Dockerfile', 'w').write('\n'.join(dockerfile))
+
+
+  #
   # build
   #
 
   if cliargs.verbose > 1:
-    sys.stdout.write('building image...\n')
+    sys.stdout.write('building base image...\n')
 
   subprocess.check_call(
-    'docker build -rm -t "%s" .' % identFriendly,
+    'docker build -rm -t "%s-base" .' % identFriendly,
     shell=True,
     stdout=TASK_STDOUT,
     stderr=TASK_STDERR,
   )
 
   if cliargs.verbose > 0:
-    sys.stdout.write('built image\n')
+    sys.stdout.write('built base image\n')
+
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('provisioning image...\n')
+
+  dockerargs = [ 'docker', 'run' ]
+  dockerargs.extend([ '-name', '%s-provisioned' % identFriendly ])
+
+  if cliargs.dev:
+    dockerargs.extend([ '-v', '%s:%s' % ( tmppath, '/scs' ) ])
+
+  dockerargs.append('%s-base' % identFriendly)
+  dockerargs.append('/scs/scs/runtime/provision.sh')
+
+  subprocess.check_call(
+    'docker run -name %s-builder -rm -t "%s" .' % identFriendly,
+    shell=True,
+    stdout=TASK_STDOUT,
+    stderr=TASK_STDERR,
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('provisioned image\n')
+
+
+  if cliargs.verbose > 1:
+    sys.stdout.write('committing image...\n')
+
+  subprocess.check_call(
+    'docker commit %s-provisioned %s' % ( identFriendly, identFriendly ),
+    shell=True,
+    stdout=TASK_STDOUT,
+    stderr=TASK_STDERR,
+  )
+
+  if cliargs.verbose > 0:
+    sys.stdout.write('committed image\n')
 
 
 #

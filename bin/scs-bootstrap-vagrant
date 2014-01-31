@@ -1,0 +1,60 @@
+#!/bin/bash
+
+set -e
+
+sudo locale-gen en_US.UTF-8
+
+# core tools
+apt-get -y install git python-pip
+
+# node
+mkdir /usr/local/nodejs
+pushd /usr/local/nodejs
+wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
+ln -s $PWD/bin/* /usr/bin/
+popd
+
+# scs-utils
+ln -s /vagrant/scs-utils /usr/local/scs-utils
+pushd /usr/local/scs-utils
+pip install --upgrade -r requirements.txt
+npm install
+( cd node_modules/node-etcd/ && npm install && npm run-script build )
+ln -s $PWD/bin/* /usr/bin/
+popd
+
+# docker
+wget -qO- https://get.docker.io/gpg | apt-key add -
+echo 'deb http://get.docker.io/ubuntu docker main' | tee /etc/apt/sources.list.d/docker.list
+apt-get update
+apt-get install -y linux-image-extra-`uname -r`
+apt-get install -y lxc-docker
+
+# supervisor
+apt-get install -y python-pip python-setuptools
+easy_install supervisor
+mkdir -p /var/{log,run}/supervisord
+mkdir -p /etc/supervisord.d
+cat > /etc/supervisor.conf <<EOF
+[supervisord]
+directory = /
+logfile = /var/log/supervisord/supervisord.log
+nodaemon = true
+pidfile = /var/run/supervisord/supervisord.pid
+[include]
+files = /etc/supervisord.d/*.conf
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+[unix_http_server]
+file = /var/run/supervisord/supervisord.sock
+[supervisorctl]
+serverurl=unix:///var/run/supervisord/supervisord.sock
+EOF
+cat > /etc/init/supervisor.conf <<EOF
+description "supervisor"
+start on runlevel [2345]
+stop on runlevel [!2345]
+respawn
+exec /usr/local/bin/supervisord -c /etc/supervisor.conf
+EOF
+service supervisor start

@@ -19,6 +19,7 @@ cli.add_argument('environment_name', help='Environment name (e.g. prod)')
 cli.add_argument('service_name', help='Service name (e.g. public-blog)')
 cli.add_argument('role_name', help='Role name (e.g. web-wordpress)')
 cli.add_argument('manifest', help='Local path to configuration file')
+cli.add_argument('--dev', help='Build a development container', action='store_true')
 cli.add_argument('--zone', help='A delegation zone', default='default')
 cli.add_argument('--etcd', help='The etcd cluster for service registration', default='127.0.0.1:4001', metavar='HOST[:PORT]')
 cli.add_argument('--source-reference', help='Commit reference to use when a manifest does not provide a canonical one', metavar='REF')
@@ -36,9 +37,6 @@ cliargs = cli.parse_args()
 # setup our basics
 #
 
-ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
-ec2api = boto.ec2.connect_to_region(ec2instance['region'])
-
 DEVNULL = open(os.devnull, 'w')
 
 if cliargs.verbose > 2:
@@ -49,6 +47,41 @@ else:
   TASK_STDERR = DEVNULL
 
 absmanifest = os.path.abspath(cliargs.manifest)
+
+if cliargs.dev:
+  passthruargs = '--dev'
+else:
+  passthruargs = ''
+
+ec2instance = None
+ec2api = None
+volumes = None
+devicemap = {
+  '/dev/sdf' : '/dev/xvdf',
+  '/dev/sdg' : '/dev/xvdg',
+  '/dev/sdh' : '/dev/xvdh',
+  '/dev/sdi' : '/dev/xvdi',
+  '/dev/sdj' : '/dev/xvdj',
+  '/dev/sdk' : '/dev/xvdk',
+  '/dev/sdl' : '/dev/xvdl',
+  '/dev/sdm' : '/dev/xvdm',
+  '/dev/sdn' : '/dev/xvdn',
+  '/dev/sdo' : '/dev/xvdo',
+  '/dev/sdp' : '/dev/xvdp',
+}
+
+def load_aws_ec2_data():
+  if None != ec2api:
+    return
+
+  ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
+  ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+
+  volumes = ec2api.get_all_volumes(filters = { 'attachment.instance-id' : ec2instance['instanceId'] })
+
+  for volume in volumes:
+    if volume.attach_data.device in devicemap:
+      del devicemap[volume.attach_data.device]
 
 #
 # load configuration
@@ -83,12 +116,14 @@ if 'git' == config_runtime['source']['type']:
     realref = p.stdout.read().strip()
   else:
     realref = niceref
-
-  if 0 == len(realref):
-    raise RuntimeError('Unable to resolve source reference "%s".' % niceref)
+elif 'local' == config_runtime['source']['type']:
+  niceref = cliargs.source_reference
+  realref = cliargs.source_reference
 else:
   raise RuntimeError('Unexpected source type.')
 
+if None == realref or 0 == len(realref):
+  raise RuntimeError('Unable to resolve source reference "%s".' % niceref)
 
 #
 # identifiers
@@ -137,13 +172,14 @@ if 0 < p.returncode:
     sys.stdout.write('building image...\n')
 
   subprocess.check_call(
-    'scs-docker-build --source-reference %s -vvv %s %s %s %s %s' % (
+    'scs-docker-build --source-reference %s -vvv %s %s %s %s %s %s' % (
       realref,
-      cliargs.build_args,
+      cliargs.build_args if cliargs.build_args else '',
+      passthruargs,
       cliargs.environment_name,
       cliargs.service_name,
       cliargs.role_name,
-      cliargs.manifest,
+      absmanifest,
     ),
     shell = True,
     stdout = TASK_STDOUT,
@@ -189,6 +225,7 @@ if 'volumes' not in config_stateful:
 if 'requires' not in config_stateful:
   config_stateful['requires'] = {}
 
+config_stateful['dev'] = cliargs.dev
 config_stateful['source'] = {
   'reference' : realref,
 }
@@ -219,31 +256,6 @@ def writeconfig_stateful():
 
 sys.excepthook = excepthook
 
-#
-# check available volumes, if necessary
-#
-
-devicemap = {
-  '/dev/sdf' : '/dev/xvdf',
-  '/dev/sdg' : '/dev/xvdg',
-  '/dev/sdh' : '/dev/xvdh',
-  '/dev/sdi' : '/dev/xvdi',
-  '/dev/sdj' : '/dev/xvdj',
-  '/dev/sdk' : '/dev/xvdk',
-  '/dev/sdl' : '/dev/xvdl',
-  '/dev/sdm' : '/dev/xvdm',
-  '/dev/sdn' : '/dev/xvdn',
-  '/dev/sdo' : '/dev/xvdo',
-  '/dev/sdp' : '/dev/xvdp',
-}
-
-if 'volumes' in config_runtime:
-  volumes = ec2api.get_all_volumes(filters = { 'attachment.instance-id' : ec2instance['instanceId'] })
-
-  for volume in volumes:
-    if volume.attach_data.device in devicemap:
-      del devicemap[volume.attach_data.device]
-
 
 #
 # handle volume mounts
@@ -259,6 +271,8 @@ for volkey in config_runtime['volumes']:
     volmap = config_stateful['volumes'][volkey]
 
   if 'aws_ec2_ebs' == volval['method']:
+    load_aws_ec2_data()
+
     if False == volmap:
       voldevice = False
 

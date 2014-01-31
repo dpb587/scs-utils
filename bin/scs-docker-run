@@ -201,7 +201,7 @@ function mainReady() {
 
   if ('volumes' in config_definition) {
     for (var key in config_definition['volumes']) {
-      dockerargs.push('-v', config_stateful['volumes'][key]['path'] + ':/scs/mnt/' + key);
+      dockerargs.push('-v', config_stateful['volumes'][key]['path'] + ':/scs-mnt/' + key);
     }
   }
 
