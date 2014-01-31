@@ -99,7 +99,7 @@ function updateForwarder(provide, data) {
 
   var endpoint = data['node']['nodes'][0]['value'];
 
-  if (endpoint == endpoints[provide]) {
+  if ((provide in endpoints) && (endpoint == endpoints[provide].join(':'))) {
     return;
   }
 
