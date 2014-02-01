@@ -71,6 +71,11 @@ devicemap = {
 }
 
 def load_aws_ec2_data():
+  global ec2api
+  global ec2instance
+  global devicemap
+  global volumes
+
   if None != ec2api:
     return
 
@@ -356,7 +361,7 @@ open(cliargs.supervisor_program_conf % identLocal, 'w').write('\n'.join(conf))
 # supervisor control calls
 #
 
-if not cliargs.no_supervisor_control:
+if True != cliargs.no_supervisor_control:
   if cliargs.verbose > 1:
     sys.stdout.write('updating supervisord...\n')
 
