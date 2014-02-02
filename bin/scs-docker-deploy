@@ -4,6 +4,7 @@ import argparse
 import boto.ec2
 import datetime
 import hashlib
+import operator
 import os
 import re
 import simplejson
@@ -266,8 +267,8 @@ sys.excepthook = excepthook
 # handle volume mounts
 #
 
-for volkey in config_runtime['volumes']:
-  volval = config_runtime['volumes'][volkey] 
+for volkey in sorted(config_runtime['volumes'], key=config_runtime['volumes'].get):
+  volval = config_runtime['volumes'][volkey]
 
   volmap = False
 
