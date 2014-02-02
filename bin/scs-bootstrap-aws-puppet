@@ -5,9 +5,9 @@
 set -e
 
 # puppet
-wget https://apt.puppetlabs.com/puppetlabs-release-raring.deb
-dpkg -i puppetlabs-release-raring.deb
-rm puppetlabs-release-raring.deb
+wget https://apt.puppetlabs.com/puppetlabs-release-saucy.deb
+dpkg -i puppetlabs-release-saucy.deb
+rm puppetlabs-release-saucy.deb
 apt-get update
 
 # core tools
