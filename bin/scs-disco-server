@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+
+
+var cli = new (require('argparse').ArgumentParser)(
+  {
+    description : 'Run a disco registry server.'
+  }
+);
+
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+
+var cliargs = cli.parseArgs();
+
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
+
+logger.silly('process/args', JSON.stringify(cliargs));
+
+var RegistryService = require('../disco/registry/service');
+var ServerService = require('../disco/server/service');
+var HttpService = require('../disco/http/service');
+
+var context = {};
+
+context.registry = new RegistryService(null, logger);
+
+context.server = new ServerService(context.registry, null, logger);
+context.server.start();
+
+context.http = new HttpService(context, null, logger);
+context.http.start();
+
+function handleSignal(sig) {
+    logger.info('process/kill', 'received ' + sig);
+
+    context.http.stop();
+    context.server.stop();
+}
+
+process.on('SIGINT', function () { handleSignal('SIGINT'); });
+process.on('SIGTERM', function () { handleSignal('SIGTERM'); });
+process.on('SIGHUP', function () { handleSignal('SIGHUP'); });

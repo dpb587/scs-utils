@@ -3,6 +3,7 @@
         "argparse" : "*",
         "npmlog" : "0.0.6",
         "node-etcd" : "2.0.8",
-        "js-yaml" : "3.0.1"
+        "js-yaml" : "3.0.1",
+        "node-uuid" : "1.4.1"
     }
 }
