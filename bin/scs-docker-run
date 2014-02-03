@@ -23,7 +23,7 @@ logger.silly('args', JSON.stringify(cliargs));
 
 config_stateful = JSON.parse(fs.readFileSync(cliargs.manifest, { encoding : 'utf8' }));
 config_definition = yaml.safeLoad(fs.readFileSync('/var/lib/docker/aufs/mnt/' + config_stateful['docker']['image'] + '/scs/scs/manifest.yaml', { encoding : 'utf8' }));
-config_runtime = yaml.safeLoad(fs.readFileSync('/var/lib/scs-docker/' + config_stateful['ident']['local'] + '/manifest.yaml', { encoding : 'utf8' }));
+config_runtime = yaml.safeLoad(fs.readFileSync('/var/lib/scs-docker/' + config_stateful['ident']['local'] + '/deploy.yaml', { encoding : 'utf8' }));
 
 var etcd = new (require('node-etcd'))(config_stateful['etcd'][0], config_stateful['etcd'][1] || 4001);
 

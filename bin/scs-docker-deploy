@@ -231,6 +231,9 @@ if 'volumes' not in config_stateful:
 if 'requires' not in config_stateful:
   config_stateful['requires'] = {}
 
+if 'requires' in config_runtime:
+  config_runtime['requires'] = config_runtime['requires']
+
 config_stateful['dev'] = cliargs.dev
 config_stateful['source'] = {
   'reference' : realref,
@@ -341,7 +344,7 @@ for volkey in sorted(config_runtime['volumes'], key=config_runtime['volumes'].ge
 # archive manifest
 #
 
-open('/var/lib/scs-docker/%s/manifest.yaml' % identLocal, 'w').write(open(absmanifest, 'r').read())
+open('/var/lib/scs-docker/%s/deploy.yaml' % identLocal, 'w').write(open(absmanifest, 'r').read())
 
 
 #
