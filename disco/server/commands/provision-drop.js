@@ -21,15 +21,14 @@ module.exports = {
 
         var responded = false;
         var responseTimeout = null;
-        var phandle = socket.session.getProvisionByHandle(args.handle);
+
+        var phandle = registry.getProvisionByHandle(args.handle);
         phandle.activeClient = false;
 
-        socket.registry.unregisterProvision(
+        registry.dropProvisionHandle(
             args.handle,
             function () {
                 handle.activeServer = false;
-
-                socket.session.dropProvisionHandle(args.handle);
 
                 if (!responded) {
                     clearTimeout(responseTimeout);
@@ -40,10 +39,12 @@ module.exports = {
         );
 
         if (null === args.wait) {
+            responded = true;
             respond(null, { success : true });
         } else if (0 < args.wait) {
             responseTimeout = setTimeout(
                 function () {
+                    responded = true;
                     respond(null, { success : true, timed_out : true });
                 },
                 1000 * args.wait

@@ -18,14 +18,10 @@ module.exports = {
             type : 'string',
             title : 'Endpoint Name'
         },
-        options : {
+        attributes : {
             type : 'object',
-            required : false,
-            title : 'Service Options',
-            description : [
-                'Available options are:',
-                ' * attributes (object) - key/regex pairs to find usable services'
-            ].join('\n')
+            title : 'Arbitrary attributes for filtering',
+            required : false
         }
     },
     handle : function (session, args, respond) {
@@ -38,6 +34,6 @@ module.exports = {
         var rid = registry.addRequirementHandle(session, args);
         var endpoints = registry.discoverRequirements(rid);
 
-        respond(null, { handle : rid, endpoints : endpoints });
+        respond(null, { id : rid, endpoints : endpoints });
     }
 };

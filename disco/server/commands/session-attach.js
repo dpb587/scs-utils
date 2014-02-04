@@ -1,19 +1,19 @@
 module.exports = {
     about : 'Reattach to an existing session.',
     args : {
-        uuid : {
+        id : {
             type : 'string',
             title : 'Client Identifier',
             required : false,
             description : 'The previously supplied client identifier when reconnecting a disconnected socket.'
         }
     },
-    handle : function (socket, payload, respond) {
-        if (socket.session) {
-            throw new Error('Socket is already bound to a session.');
+    handle : function (session, args, respond) {
+        if (session.socket.service.registry.hasSession(session.id)) {
+            throw new Error('Session is already registered.');
         }
 
-        socket.bindSession(session);
+        session.socket.service.registry.sessionRejoin(args.id);
 
         respond(null, true);
     }

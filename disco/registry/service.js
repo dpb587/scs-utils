@@ -37,9 +37,9 @@ Registry.prototype.sessionRejoin = function (id) {
  */
 
 Registry.prototype.addProvisionHandle = function (session, options) {
-    var id = uuid.v4();
-
-    this.provisionHandles[id] = {
+    // create our handle
+    var pid = uuid.v4();
+    var phandle = {
         activeServer : true,
         activeClient : true,
         session : session.id,
@@ -48,12 +48,156 @@ Registry.prototype.addProvisionHandle = function (session, options) {
         role : options.role,
         endpoint : options.endpoint,
         stat_created : new Date(),
-        address : {
-            host : options.dhost,
-            port : options.dport
-        },
-        attributes : options.options.attributes || {},
+        address : options.address,
+        attributes : options.attributes || {},
         required_by : {}
+    };
+
+    this.provisionHandles[pid] = phandle;
+
+    // add to discovery map
+    var lookup = getLookupFromOptions(options);
+
+    if (!(lookup in this.discoveryMap)) {
+        this.discoveryMap[lookup] = {
+            provided_by : {},
+            watched_by : {}
+        };
+    }
+
+    this.discoveryMap[lookup].provided_by[pid] = true;
+
+    // log it
+    this.logger.verbose(
+        'provision/handle#' + pid,
+        'added'
+    );
+
+    // see if anyone cares about this
+    for (var rid in this.discoveryMap[lookup].watched_by) {
+        if (!this.discoveryMap[lookup].watched_by[rid]) {
+            // being terminated
+            continue;
+        }
+
+        var rhandle = this.requirementHandles[rid];
+
+        if (!this.doesRequirementWantProvision(rhandle, phandle)) {
+            continue;
+        }
+
+        // update and notify
+        phandle.required_by[rid] = true;
+
+        this.sessions[rhandle.session].sendCommand(
+            'requirement.changed',
+            {
+                id : rid,
+                action : 'add',
+                provision : {
+                    id : pid,
+                    address : phandle.address,
+                    attributes : phandle.attributes
+                }
+            },
+            function () {
+                // okay
+            }
+        );
+    }
+
+    return pid;
+};
+
+Registry.prototype.getProvisionByHandle = function (pid) {
+    if (!(pid in this.provisionHandles)) {
+        throw new Error('Registry does not provide ' + pid);
+    }
+
+    return this.provisionHandles[pid]
+}
+
+Registry.prototype.dropProvisionHandle = function (pid, callback) {
+    var that = this;
+
+    if (!(pid in this.provisionHandles)) {
+        throw new Error('Registry does not provide ' + pid);
+    }
+
+    var phandle = this.provisionHandles[pid];
+    phandle.activeServer = false;
+
+    var ackrem = 0;
+
+    function readyCallback() {
+        if (0 < ackrem) {
+            return;
+        }
+
+        delete this.provisionHandles[pid];
+
+        callback();
+    }
+
+    Object.keys(phandle.required_by).forEach(
+        function (rid) {
+            if (!phandle.required_by[rid]) {
+                // already being terminated
+                return;
+            }
+
+            phandle.required_by[rid] = false;
+
+            var rhandle = that.requirementHandles[rid];
+
+            that.sessions[rhandle.session].sendCommand(
+                'requirement.changed',
+                {
+                    id : rid,
+                    action : 'drop',
+                    provision : {
+                        id : pid,
+                        address : phandle.address,
+                        attributes : phandle.attributes
+                    }
+                },
+                function () {
+                    ackrem -= 1;
+
+                    delete phandle.required_by[rid];
+
+                    readyCallback();
+                }
+            );
+
+            ackrem += 1;
+        }
+    );
+}
+
+/**
+ * requirements
+ */
+
+Registry.prototype.addRequirementHandle = function (session, options) {
+    var id = uuid.v4();
+
+    var attributes_re = options.attributes || {};
+
+    for (var key in attributes_re) {
+        attributes_re[key] = new RegExp(attributes_re[key]);
+    }
+
+    this.requirementHandles[id] = {
+        activeServer : true,
+        activeClient : true,
+        session : session.id,
+        environment : options.environment,
+        service : options.service,
+        role : options.role,
+        endpoint : options.endpoint,
+        attributes : options.attributes || {},
+        attributes_re : options.attributes_re
     };
 
     var lookup = getLookupFromOptions(options);
@@ -65,55 +209,8 @@ Registry.prototype.addProvisionHandle = function (session, options) {
         };
     }
 
-    this.discoveryMap[lookup].provided_by[id] = true;
+    this.discoveryMap[lookup].watched_by[id] = true;
 
-    this.logger.verbose(
-        'provision/handle#' + id,
-        'added'
-    );
-
-    return id;
-};
-
-Registry.prototype.getProvisionByHandle = function (id) {
-    if (!(id in this.provisionHandles)) {
-        throw new Error('Registry does not provide ' + id);
-    }
-
-    return this.provisionHandles[id]
-}
-
-Registry.prototype.dropProvisionHandle = function (id) {
-    if (!(id in this.provisionHandles)) {
-        throw new Error('Registry does not provide ' + id);
-    }
-
-    var provision = this.provisionHandles[id];
-
-    if (provision.activeServer || provision.activeClient) {
-        throw new Error('Provision seems to be active: ' + [ provision.activeServer ? 'server' : '', provision.activeClient ? 'client' : '' ].join(','));
-    }
-
-    delete this.provisionHandles[id];
-};
-
-/**
- * requirements
- */
-
-Registry.prototype.addRequirementHandle = function (session, options) {
-    var id = uuid.v4();
-
-    this.requirementHandles[id] = {
-        activeServer : true,
-        activeClient : true,
-        session : session.id,
-        environment : options.environment,
-        service : options.service,
-        role : options.role,
-        endpoint : options.endpoint,
-        attributes : options.attributes || {}
-    };
 
     return id;
 };
@@ -140,49 +237,6 @@ Registry.prototype.dropRequirementHandle = function (id) {
     delete this.requirementHandles[id];
 };
 
-
-Registry.prototype.unregisterProvision = function (session, handle, wait, callback) {
-    var that = this;
-    var provision = session.getProvisionByHandle(handle);
-    var ackrem = 0;
-
-    function readyCallback() {
-        if (0 < ackrem) {
-            return;
-        }
-
-        delete this.coremap[provision.lookup][session.id + ':' + handle];
-
-        if (wait) {
-            callback();
-        }
-    }
-
-    this.coremap[provision.lookup][session.id + ':' + handle].forEach(
-        function (duokey) {
-            var duokey = duokey.split(':');
-
-            that.sessions[duokey[0]].send(
-                'requirement.drop',
-                [ duokey[1] ],
-                function () {
-                    ackrem -= 1;
-
-                    delete this.coremap[provision.lookup][session.id + ':' + handle][duokey];
-
-                    readyCallback();
-                }
-            );
-
-            ackrem += 1;
-        }
-    );
-
-    if (!wait) {
-        callback();
-    }
-}
-
 Registry.prototype.discoverRequirements = function (rid) {
     var that = this;
     var rhandle = this.getRequirementByHandle(rid);
@@ -195,32 +249,18 @@ Registry.prototype.discoverRequirements = function (rid) {
 
     var endpointMap = this.discoveryMap[lookup];
 
-    var attributes = rhandle.attributes;
-    var attributeslen = Object.keys(attributes).length;
-
-    for (var key in attributes) {
-        attributes[key] = new RegExp(attributes[key]);
-    }
-
     var matches = [];
 
     Object.keys(endpointMap.provided_by).forEach(
         function (pid) {
             var phandle = that.getProvisionByHandle(pid);
 
-            if (!phandle.activeServer || !phandle.activeClient) {
+            if (!that.doesRequirementWantProvision(rhandle, phandle)) {
                 return;
-            } else if (0 < attributeslen) {
-                for (var key in attributes) {
-                    if (!(key in phandle.attributes)) {
-                        return;
-                    } else if (!attributes[key].match(phandle.attributes[key])) {
-                        return;
-                    }
-                }
             }
 
             matches.push({
+                handle : pid,
                 address : phandle.address,
                 attributes : phandle.attributes
             });
@@ -230,6 +270,22 @@ Registry.prototype.discoverRequirements = function (rid) {
     );
 
     return matches;
+}
+
+Registry.prototype.doesRequirementWantProvision = function (rhandle, phandle) {
+    if (!phandle.activeServer || !phandle.activeClient) {
+        return false;
+    }
+
+    for (var key in rhandle.attributes) {
+        if (!(key in phandle.attributes)) {
+            return false;
+        } else if (!rhandle.attributes[key].match(phandle.attributes[key])) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 module.exports = Registry;

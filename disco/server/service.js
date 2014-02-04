@@ -1,12 +1,13 @@
 var net = require('net');
-var Socket = require('../session/socket');
-var Session = require('../session/instance');
+var uuid = require('node-uuid');
 var Commands = require('./commands');
+var Session = require('../session');
+var Socket = require('../socket');
 
 function attachSocket(service, socket) {
     var wrapped = new Socket(service, socket, null, service.logger);
 
-    wrapped.bindSession(new Session(Commands, service.logger));
+    wrapped.bindSession(new Session(uuid.v4(), Commands, service.logger));
 
     service.sockets[wrapped.id] = wrapped;
 }

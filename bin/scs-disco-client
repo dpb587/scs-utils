@@ -1,0 +1,26 @@
+#!/usr/bin/env node
+
+var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco registry client.' });
+    cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+var cliargs = cli.parseArgs();
+
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
+logger.silly('process/args', JSON.stringify(cliargs));
+
+
+var client = new (require('../disco/client/service'))(null, logger);
+client.addProvision('mysql', { host : '192.168.181.168', port : 40915 });
+client.addRequirement('mysql', function () { console.log(arguments); });
+client.start();
+
+
+function handleSignal(sig) {
+    logger.info('process/kill', 'received ' + sig);
+
+    client.stop();
+}
+
+process.on('SIGINT', function () { handleSignal('SIGINT'); });
+process.on('SIGTERM', function () { handleSignal('SIGTERM'); });
+process.on('SIGHUP', function () { handleSignal('SIGHUP'); });

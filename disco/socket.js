@@ -47,13 +47,15 @@ function Socket(service, socket, options, logger) {
             try {
                 dataBuffer = [ that.handleDataBuffer(dataBuffer.join('')) ];
             } catch (e) {
-                that.write('\nError: ' + e.message + '\n');
+                that.write('e ' + JSON.stringify({ code : e.code, message : e.message }) + '\n');
 
-                that.logger.error('socket#' + that.id, e.message);
+                that.logger.error('socket#' + that.id + '/error/sent', e.code + ': ' + e.message);
                 that.logger.info(e.stack);
             }
         }
-    })
+    });
+
+    this.timeoutSendHandle = setInterval(this.sendHeartbeat.bind(this), 25000);
 }
 
 Socket.prototype.resetTimeoutRecv = function () {
@@ -130,13 +132,17 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     var remainder = buffer.substring(thru + 1);
     var parsed;
 
-    if (('' == raw[0]) && (1 == raw.length)) {
+    if (0 == raw.length) {
         this.resetTimeoutRecv();
     } else if (parsed = raw.match(/^r:([^ ]+) ([^ ]+)$/)) {
         this.session.recvResult(parsed[1], JSON.parse(parsed[2]));
     } else if (parsed = raw.match(/^c:([^ ]+) ([^ ]+)( ([^ ]+))?$/)) {
         this.session.recvCommand(parsed[1], parsed[2], (parsed[4] && parsed[4].length) ? JSON.parse(parsed[4]) : {});
         this.resetTimeoutRecv();
+    } else if (parsed = raw.match(/^e (.+)$/)) {
+        var error = JSON.parse(parsed[1]);
+
+        this.logger.error('socket#' + this.id + '/error/recv', e.code + ': ' + e.message);
     } else {
         throw new Error('Unrecognized message format.');
     }

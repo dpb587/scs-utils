@@ -18,22 +18,18 @@ module.exports = {
             type : 'string',
             title : 'Endpoint Name'
         },
-        dhost : {
-            type : 'string',
-            title : 'Endpoint Host'
-        },
-        dport : {
-            type : 'integer',
-            title : 'Endpoint Port'
-        },
-        options : {
+        address : {
             type : 'object',
-            required : false,
-            title : 'Service Options',
+            title : 'Endpoint Address',
             description : [
-                'Available options are:',
-                ' * attributes (object) - simple key/value pairs about the service'
+                ' * host (string) - IP or hostname',
+                ' * port (integer) - port number'
             ].join('\n')
+        },
+        attributes : {
+            type : 'object',
+            title : 'Arbitrary attributes for filtering',
+            required : false
         }
     },
     handle : function (session, args, respond) {
@@ -45,6 +41,6 @@ module.exports = {
 
         var pid = registry.addProvisionHandle(session, args);
 
-        respond(null, { handle : pid });
+        respond(null, { id : pid });
     }
 };

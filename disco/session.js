@@ -1,7 +1,7 @@
 var uuid = require('node-uuid');
 
-function Session(commands, logger) {
-    this.id = uuid.v4();
+function Session(id, commands, logger) {
+    this.id = id;
     this.commands = commands;
     this.options = {};
     this.logger = logger;
@@ -22,6 +22,10 @@ Session.prototype.bindSocket = function (socket) {
 };
 
 Session.prototype.unbindSocket = function () {
+    if (null === this.socket) {
+        return;
+    }
+
     this.socket = null;
 
     this.logger.silly('session#' + this.id + '/socket', 'unbound');
@@ -110,8 +114,9 @@ Session.prototype.recvResult = function (id, result) {
     }
 
     var cbref = this.commandCallbacks[id];
+    delete this.commandCallbacks[id];
 
-    this.session[cbref[0]](cbref[1], result);
+    cbref(('error' in result) ? result.error : null, ('result' in result) ? result.result : null);
 };
 
 module.exports = Session;

@@ -17,6 +17,6 @@ module.exports = {
         session.socket.service.registry.sessionJoin(session);
         session.setOptions(args.options);
 
-        respond(null, { session : session.id });
+        respond(null, { id : session.id });
     }
 };
