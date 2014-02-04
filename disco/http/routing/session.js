@@ -9,7 +9,7 @@ module.exports = [
 
             Object.keys(context.registry.sessions).forEach(
                 function (id) {
-                    data.index.push(
+                    result.index.push(
                         {
                             url : '/session/' + id + '/'
                         }
@@ -17,7 +17,7 @@ module.exports = [
                 }
             );
 
-            return data;
+            return result;
         }
     }
 ];

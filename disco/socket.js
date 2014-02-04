@@ -142,7 +142,7 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     } else if (parsed = raw.match(/^e (.+)$/)) {
         var error = JSON.parse(parsed[1]);
 
-        this.logger.error('socket#' + this.id + '/error/recv', e.code + ': ' + e.message);
+        this.logger.error('socket#' + this.id + '/error/recv', error.code + ': ' + error.message);
     } else {
         throw new Error('Unrecognized message format.');
     }

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco registry client.' });
+    cli.addArgument([ '--environment' ], { help : 'environment name', defaultValue : 'default' });
+    cli.addArgument([ '--service' ], { help : 'service name', defaultValue : 'default' });
+    cli.addArgument([ '--role' ], { help : 'role name', defaultValue : 'default' });
     cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 var cliargs = cli.parseArgs();
 
@@ -11,7 +14,14 @@ logger.silly('process/args', JSON.stringify(cliargs));
 
 var client = new (require('../disco/client/service'))(null, logger);
 client.addProvision('mysql', { host : '192.168.181.168', port : 40915 });
-client.addRequirement('mysql', function () { console.log(arguments); });
+client.addRequirement(
+    'mysql',
+    function (action, endpoints, ack) {
+        logger.info('require/mysql/' + action, JSON.stringify(endpoints, null, 2));
+
+        ack();
+    }
+);
 client.start();
 
 

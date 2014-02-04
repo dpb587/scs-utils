@@ -25,6 +25,7 @@ function Service(options, logger) {
     this.session = new Session('anonymous', commands, logger);
 
     this.reconnectBackoff = 0;
+    this.reconnectTimer = null;
 
     this.provisionHandles = {};
     this.requirementHandles = {};
@@ -134,7 +135,7 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
             that.requirementHandles[lid].endpoints = result.endpoints;
             that.requirementHandles[lid].handle = result.id;
             that.requirementHandles[lid].activeRemote = true;
-            that.requirementHandles[lid].callback('reset', result.endpoints);
+            that.requirementHandles[lid].callback('reset', result.endpoints, function () {});
         }
     );
 }
@@ -209,7 +210,7 @@ Service.prototype.reconnect = function () {
         if (that.activeLocal) {
             that.logger.silly('client', 'reconnecting in ' + that.reconnectBackoff + ' seconds...');
 
-            setTimeout(
+            that.reconnectTimer = setTimeout(
                 function () {
                     that.reconnectBackoff += 10;
                     that.reconnect();
@@ -232,6 +233,9 @@ Service.prototype.stop = function (callback) {
     if (callback) this.server.on('close', callback);
 
     this.activeLocal = false;
+
+    clearTimeout(this.reconnectTimer);
+    this.reconnectBackoff = 0;
 
     this.logger.silly('client', 'disconnecting...');
 
