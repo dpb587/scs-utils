@@ -5,10 +5,15 @@ var util = require('util');
 function Socket(service, raw, options, logger) {
     var that = this;
 
+    options = options || {};
+    options.heartbeatRecv = 'heartbeatRecv' in options ? options.heartbeatRecv : 70000;
+    options.heartbeatSend = 'heartbeatSend' in options ? options.heartbeatSend : 20000;
+    this.options = options;
+
     this.id = uuid.v4();
     this.service = service;
 
-    this.raw = socket;
+    this.raw = raw;
 
     this.createdAt = new Date();
 
@@ -55,7 +60,12 @@ function Socket(service, raw, options, logger) {
         }
     });
 
-    this.heartbeatSendHandle = setInterval(this.sendHeartbeat.bind(this), 25000);
+    if (this.options.heartbeatSend > 0) {
+        this.heartbeatSendHandle = setInterval(
+            this.sendHeartbeat.bind(this),
+            this.options.heartbeatSend
+        );
+    }
 
     this.logger.silly(
         this.loggerTopic,
@@ -104,7 +114,7 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     var parsed;
 
     if (0 == raw.length) {
-        this.resetTimeoutRecv();
+        // just a heartbeat
     } else if (parsed = raw.match(/^r:([^ ]+) ([^ ]+)$/)) {
         this.emit('result', parsed[1], JSON.parse(parsed[2]));
     } else if (parsed = raw.match(/^c:([^ ]+) ([^ ]+)( ([^ ]+))?$/)) {
@@ -120,7 +130,7 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     return this.handleDataBuffer(remainder);
 }
 
-Socket.prototype.sendError(error) {
+Socket.prototype.sendError = function (error) {
     this.write('e ' + JSON.stringify({ name : error.name, message : error.message }) + '\n');
 
     this.logger.error(
@@ -133,16 +143,16 @@ Socket.prototype.sendError(error) {
     );
 }
 
-Socket.prototype.sendResult(reqid, error, result) {
+Socket.prototype.sendResult = function (reqid, error, result) {
     if (error) {
-        socket.write('r:' + reqid + ' ' + JSON.stringify({ error : { name : error.name, message : error.message } }) + '\n');
+        this.write('r:' + reqid + ' ' + JSON.stringify({ error : { name : error.name, message : error.message } }) + '\n');
     } else {
-        socket.write('r:' + reqid + ' ' + JSON.stringify({ result : result }) + '\n');
+        this.write('r:' + reqid + ' ' + JSON.stringify({ result : result }) + '\n');
     }
 }
 
-Socket.prototype.sendCommand(reqid, command, data) {
-    this.write('c:' + reqid + ' ' + command + ' ' + JSON.stringify(data) + '\n');
+Socket.prototype.sendCommand = function (reqid, command, data) {
+    this.write('c:' + reqid + ' ' + command + ('undefined' !== typeof data ? (' ' + JSON.stringify(data)) : '') + '\n');
 }
 
 Socket.prototype.end = function () {

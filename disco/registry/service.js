@@ -21,6 +21,8 @@ Service.prototype.createSession = function (socket, options) {
     var session = new Session(this, options, this.logger);
     session.attach(socket);
 
+    this.sessions[session.id] = session;
+    
     return session;
 };
 
@@ -45,6 +47,8 @@ Service.prototype.getSession = function (id) {
  */
 
 Service.prototype.addProvision = function (session, options) {
+    var that = this;
+
     // create our handle
     var pid = uuid.v4();
     var phandle = {
@@ -108,8 +112,15 @@ Service.prototype.addProvision = function (session, options) {
                     attributes : phandle.attributes
                 }
             },
-            function () {
-                // okay
+            function (error, result) {
+                if (error) {
+                    delete phandle.required_by[rid];
+
+                    that.logger.error(
+                        that.loggerTopic,
+                        'Client did not acknowledge requirement change: ' + error.name + ': ' + error.message
+                    );
+                }
             }
         );
     }
