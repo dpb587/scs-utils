@@ -2,10 +2,9 @@ var assert = require('assert');
 var net = require('net');
 var RegistryService = require('../../../../../src/disco/registry/service');
 var TcpService = require('../../../../../src/disco/service/tcp/server/service');
-var Commander = require('../../../../../src/disco/service/commander');
 
 var logger = require('npmlog');
-logger.level = 'silent';
+logger.level = 'silly';
 
 function startSecondSocket (tcp, first, firstTriggers) {
     var ids = {};
@@ -62,7 +61,6 @@ describe('disco/service/tcp/scenario/simple-provision-require', function () {
         var registry = new RegistryService(null, logger);
         var tcp = new TcpService(
             registry,
-            new Commander(registry),
             {
                 listen : {
                     port : 0

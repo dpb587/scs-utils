@@ -5,16 +5,93 @@ var logger = require('npmlog');
 logger.level = 'silent';
 
 describe('disco/service/tcp/socket', function () {
+    describe('.cleanupCommandArgs', function () {
+        it('errors on missing args', function () {
+            var socket = TestUtilSocket.createMockSocket();
+
+            assert.throws(
+                function () {
+                    socket.cleanupCommandArgs(
+                        {
+                            args : {
+                                reqme : {
+                                    required : true
+                                }
+                            }
+                        },
+                        {}
+                    );
+                },
+                SyntaxError
+            );
+        })
+
+        it('errors on extra args', function () {
+            var socket = TestUtilSocket.createMockSocket();
+
+            assert.throws(
+                function () {
+                    socket.cleanupCommandArgs(
+                        {
+                            args : {}
+                        },
+                        {
+                            nonme : 'nope'
+                        }
+                    );
+                },
+                SyntaxError
+            );
+        })
+
+        it('injects null for non-required default', function () {
+            var socket = TestUtilSocket.createMockSocket();
+            var args = socket.cleanupCommandArgs(
+                {
+                    args : {
+                        reqme : {
+                            required : false
+                        }
+                    }
+                },
+                {}
+            );
+
+            assert.strictEqual(args.reqme, null);
+        })
+
+        it('invokes validate when available', function () {
+            var socket = TestUtilSocket.createMockSocket();
+            var args = socket.cleanupCommandArgs(
+                {
+                    args : {
+                        addme : {}
+                    },
+                    validate : function (args) {
+                        args.addme += 1;
+
+                        return args;
+                    }
+                },
+                {
+                    addme : 1
+                }
+            );
+
+            assert.strictEqual(args.addme, 2);
+        })
+    });
+
     describe('reads data stream', function () {
         it('accepts results', function (done) {
             var socket = TestUtilSocket.createMockSocket();
 
-            socket.on('result', function (msgid, data) {
+            socket.recvResult = function (msgid, data) {
                 assert.equal('0', msgid);
                 assert.deepEqual({ result : { ack : true } }, data);
 
                 done();
-            });
+            };
 
             socket.raw.emit('data', 'r:0 {"result":{"ack":true}}\n');
         });
@@ -22,13 +99,13 @@ describe('disco/service/tcp/socket', function () {
         it('accepts commands w/ args', function (done) {
             var socket = TestUtilSocket.createMockSocket();
 
-            socket.on('command', function (msgid, command, args) {
+            socket.recvCommand = function (msgid, command, args) {
                 assert.equal('1', msgid);
                 assert.equal('util.ping', command);
                 assert.deepEqual({ reply : "hello" }, args);
 
                 done();
-            });
+            };
 
             socket.raw.emit('data', 'c:1 util.ping {"reply":"hello"}\n');
         });
@@ -36,13 +113,13 @@ describe('disco/service/tcp/socket', function () {
         it('accepts commands w/o args', function (done) {
             var socket = TestUtilSocket.createMockSocket();
 
-            socket.on('command', function (msgid, command, args) {
+            socket.recvCommand = function (msgid, command, args) {
                 assert.equal('2', msgid);
                 assert.equal('util.ping', command);
                 assert.deepEqual({}, args);
 
                 done();
-            });
+            };
 
             socket.raw.emit('data', 'c:2 util.ping\n');
         });
@@ -50,12 +127,12 @@ describe('disco/service/tcp/socket', function () {
         it('accepts errors', function (done) {
             var socket = TestUtilSocket.createMockSocket();
 
-            socket.on('error', function (error) {
+            socket.recvError = function (error) {
                 assert.equal(error.name, 'Error');
                 assert.equal(error.message, 'testme');
 
                 done();
-            });
+            };
 
             socket.raw.emit('data', 'e {"name":"Error","message":"testme"}\n');
         });
@@ -75,12 +152,12 @@ describe('disco/service/tcp/socket', function () {
         it('parses split packets', function (done) {
             var socket = TestUtilSocket.createMockSocket();
 
-            socket.on('error', function (error) {
+            socket.recvError = function (error) {
                 assert.equal(error.name, 'Error');
                 assert.equal(error.message, 'testme');
 
                 done();
-            });
+            };
 
             socket.raw.emit('data', 'e {"name":"Error",');
             socket.raw.emit('data', '"message":"testme"}\n');
@@ -90,21 +167,21 @@ describe('disco/service/tcp/socket', function () {
             var socket = TestUtilSocket.createMockSocket();
             var first = false;
 
-            socket.on('error', function (error) {
+            socket.recvError = function (error) {
                 assert.equal(error.name, 'Error');
                 assert.equal(error.message, 'testme');
 
                 first = true;
-            });
+            };
 
-            socket.on('command', function (msgid, command, args) {
+            socket.recvCommand = function (msgid, command, args) {
                 assert.equal('2', msgid);
                 assert.equal('util.ping', command);
                 assert.deepEqual({}, args);
 
                 assert.equal(first, true);
                 done();
-            });
+            };
 
             socket.raw.emit('data', 'e {"name":"Error","message":"testme"}\nc:2 util.ping\n');
         });

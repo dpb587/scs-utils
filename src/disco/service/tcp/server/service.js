@@ -1,76 +1,9 @@
 var net = require('net');
 var uuid = require('node-uuid');
-var Commands = require('./commands');
-var Socket = require('./socket');
+var Socket = require('../socket');
+var UtilCommands = require('../../common/util-commands');
 
-function createSocket(service, raw) {
-    var socket = new Socket(service, raw, {}, service.logger);
-    var ephemeralCallbacks = {};
-
-    socket.on('result', function (msgid, result) {
-        if (msgid in ephemeralCallbacks) {
-            ephemeralCallbacks[msgid](data);
-            delete ephemeralCallbacks[msgid];
-        } else if (socket.hasSession()) {
-            socket.session.recvResult(msgid, result);
-        } else {
-            throw new Error('Received a result for an unknown request.');
-        }
-    });
-    socket.on('error', function (error) {
-        this.logger.error(
-            this.loggerTopic + '/error',
-            error.name + ': ' + error.message
-        );
-    });
-    socket.on('command', function (msgid, command, args) {
-        var commands = service.commands[socket.hasSession() ? 'session' : 'ephemeral'];
-
-        if (!(command in commands)) {
-            throw new Error('The command "' + command + '" is not available.');
-        }
-
-        var cmdrun = commands[command];
-        args = service.cleanupCommandArgs(cmdrun, args);
-
-        var session = socket.getSession();
-
-        if (session) {
-            function respond(error, result) {
-                socket.getSession().sendResult(msgid, error, result);
-            }
-        } else {
-            function respond(error, result) {
-                socket.sendResult(msgid, error, result);
-            }
-        }
-
-        try {
-            cmdrun.handle.call(
-                this,
-                service.registry,
-                socket.getSession(),
-                args,
-                respond
-            );
-        } catch (error) {
-            socket.logger.error(
-                socket.loggerTopic + '/command#' + command,
-                error.code + ': ' + error.message
-            );
-            socket.logger.info(
-                socket.loggerTopic + '/command#' + command,
-                error.stack
-            );
-
-            socket.sendError(error);
-        }
-    });
-
-    return socket;
-}
-
-function Service(registry, commander, options, logger) {
+function Service(registry, options, logger) {
     options = options || {};
 
     options.heartbeat = options.heartbeat || 15000;
@@ -80,7 +13,6 @@ function Service(registry, commander, options, logger) {
     options.listen.port = 'port' in options.listen ? options.listen.port : '9640';
 
     this.registry = registry;
-    this.commander = commander;
     this.options = options;
 
     this.logger = logger;
@@ -90,37 +22,12 @@ function Service(registry, commander, options, logger) {
 
     this.sockets = {};
 
-    this.commands = this.commander.getCommands(Commands);
-}
-
-Service.prototype.cleanupCommandArgs = function (cmdrun, args) {
-    var cmdargs = cmdrun.args || {};
-
-    for (var arg in cmdargs) {
-        if (!(arg in args)) {
-            if (cmdargs[arg].required) {
-                throw new SyntaxError('Argument "' + arg + '" is expected.');
-            } else {
-                args[arg] = 'defaultValue' in cmdargs[arg] ? cmdargs[arg].defaultValue : null;
-            }
-        }
-
-        if (('type' in cmdargs[arg]) && (null !== args[arg]) && (cmdargs[arg].type != typeof args[arg])) {
-            throw new SyntaxError('Argument "' + arg + '" should be of type ' + cmdargs[arg].type + ' (' + typeof args[arg] + ' provided)');
-        }
-    }
-
-    for (var arg in args) {
-        if (!(arg in cmdargs)) {
-            throw new SyntaxError('Argument "' + arg + '" is not expected.');
-        }
-    }
-
-    if ('validate' in cmdrun) {
-        args = cmdrun.validate(args);
-    }
-
-    return args;
+    this.socketCommands = UtilCommands.mergeCommandSets(
+        [
+            require('../../common/server/commands'),
+            require('./commands')
+        ]
+    );
 }
 
 Service.prototype.start = function (callback) {
@@ -143,15 +50,13 @@ Service.prototype.start = function (callback) {
             'started'
         );
     });
-    this.raw.on('connection', function (socket) {
-        var address = socket.address();
-
+    this.raw.on('connection', function (raw) {
         that.logger.verbose(
             that.loggerTopic,
-            'connection from ' + socket.remoteAddress + ':' + socket.remotePort
+            'connection from ' + raw.remoteAddress + ':' + raw.remotePort
         );
 
-        var socket = createSocket(that, socket);
+        var socket = new Socket(that, raw, {}, that.logger);
 
         that.sockets[socket.id] = socket;
     });

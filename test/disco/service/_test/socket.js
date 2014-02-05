@@ -1,8 +1,9 @@
 var events = require('events');
 var Socket = require('../../../../src/disco/service/tcp/socket');
+var TcpService = require('../../../../src/disco/service/tcp/server/service');
 
 var logger = require('npmlog');
-logger.level = 'silent';
+logger.level = 'silly';
 
 module.exports.createMockSocket = function (options) {
     var raw = new events.EventEmitter();
@@ -14,5 +15,10 @@ module.exports.createMockSocket = function (options) {
     options = options || {};
     options.heartbeatSend = 'heartbeatSend' in options ? options.heartbeatSend : false;
 
-    return new Socket(null, raw, options, logger);
+    return new Socket(
+        new TcpService(null, null, logger),
+        raw,
+        options,
+        logger
+    );
 }

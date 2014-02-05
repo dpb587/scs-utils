@@ -23,8 +23,13 @@ function Socket(service, raw, options, logger) {
     this.activeLocal = true;
     this.activeRemote = true;
 
+    this.session = null;
+
     this.logger = logger;
     this.loggerTopic = 'server/tcp/socket#' + this.id;
+
+    this.commands = service.socketCommands;
+    this.localCommandCallbacks = {};
 
     this.raw.setEncoding('utf8');
 
@@ -75,6 +80,18 @@ function Socket(service, raw, options, logger) {
 
 util.inherits(Socket, events.EventEmitter);
 
+Socket.prototype.setSession = function (session) {
+    this.session = session;
+}
+
+Socket.prototype.getSession = function () {
+    return this.session;
+}
+
+Socket.prototype.hasSession = function () {
+    return null !== this.session;
+}
+
 Socket.prototype.resetTimeoutRecv = function () {
     var that = this;
 
@@ -116,11 +133,11 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     if (0 == raw.length) {
         // just a heartbeat
     } else if (parsed = raw.match(/^r:([^ ]+) ([^ ]+)$/)) {
-        this.emit('result', parsed[1], JSON.parse(parsed[2]));
+        this.recvResult(parsed[1], JSON.parse(parsed[2]));
     } else if (parsed = raw.match(/^c:([^ ]+) ([^ ]+)( ([^ ]+))?$/)) {
-        this.emit('command', parsed[1], parsed[2], (parsed[4] && parsed[4].length) ? JSON.parse(parsed[4]) : {});
+        this.recvCommand(parsed[1], parsed[2], (parsed[4] && parsed[4].length) ? JSON.parse(parsed[4]) : {});
     } else if (parsed = raw.match(/^e (.+)$/)) {
-        this.emit('error', JSON.parse(parsed[1]));
+        this.recvError(JSON.parse(parsed[1]));
     } else {
         throw new Error('Unrecognized message format.');
     }
@@ -154,6 +171,99 @@ Socket.prototype.sendResult = function (reqid, error, result) {
 Socket.prototype.sendCommand = function (reqid, command, data) {
     this.write('c:' + reqid + ' ' + command + ('undefined' !== typeof data ? (' ' + JSON.stringify(data)) : '') + '\n');
 }
+
+Socket.prototype.cleanupCommandArgs = function (cmdrun, args) {
+    var cmdargs = cmdrun.args || {};
+
+    for (var arg in cmdargs) {
+        if (!(arg in args)) {
+            if (cmdargs[arg].required) {
+                throw new SyntaxError('Argument "' + arg + '" is expected.');
+            } else {
+                args[arg] = 'defaultValue' in cmdargs[arg] ? cmdargs[arg].defaultValue : null;
+            }
+        }
+
+        if (('type' in cmdargs[arg]) && (null !== args[arg]) && (cmdargs[arg].type != typeof args[arg])) {
+            throw new SyntaxError('Argument "' + arg + '" should be of type ' + cmdargs[arg].type + ' (' + typeof args[arg] + ' provided)');
+        }
+    }
+
+    for (var arg in args) {
+        if (!(arg in cmdargs)) {
+            throw new SyntaxError('Argument "' + arg + '" is not expected.');
+        }
+    }
+
+    if ('validate' in cmdrun) {
+        args = cmdrun.validate(args);
+    }
+
+    return args;
+}
+
+Socket.prototype.recvCommand = function (msgid, command, args) {
+    var that = this;
+    var commands = this.commands[this.hasSession() ? 'session' : 'ephemeral'];
+
+    if (!(command in commands)) {
+        throw new Error('The command "' + command + '" is not available.');
+    }
+
+    var cmdrun = commands[command];
+    args = this.cleanupCommandArgs(cmdrun, args);
+
+    var session = this.getSession();
+
+    if (session) {
+        function respond(error, result) {
+            that.getSession().sendResult(msgid, error, result);
+        }
+    } else {
+        function respond(error, result) {
+            that.sendResult(msgid, error, result);
+        }
+    }
+
+    try {
+        cmdrun.handle.call(
+            this,
+            this.service.registry,
+            this.getSession(),
+            args,
+            respond
+        );
+    } catch (error) {
+        this.logger.error(
+            this.loggerTopic + '/command#' + command,
+            error.code + ': ' + error.message
+        );
+        this.logger.info(
+            this.loggerTopic + '/command#' + command,
+            error.stack
+        );
+
+        this.sendError(error);
+    }
+}
+
+Socket.prototype.recvResult = function (msgid, result) {
+    if (msgid in this.localCommandCallbacks) {
+        this.localCommandCallbacks[msgid](data);
+        delete this.localCommandCallbacks[msgid];
+    } else if (this.hasSession()) {
+        this.session.recvResult(msgid, result);
+    } else {
+        throw new Error('Received a result for an unknown request.');
+    }
+}
+
+Socket.prototype.recvError = function (error) {
+    this.logger.error(
+        this.loggerTopic + '/error',
+        error.name + ': ' + error.message
+    );
+};
 
 Socket.prototype.end = function () {
     this.logger.silly(
