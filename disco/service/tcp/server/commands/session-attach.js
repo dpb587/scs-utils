@@ -8,13 +8,9 @@ module.exports = {
             description : 'The previously supplied client identifier when reconnecting a disconnected socket.'
         }
     },
-    handle : function (session, args, respond) {
-        if (session.socket.service.registry.hasSession(session.id)) {
-            throw new Error('Session is already registered.');
-        }
+    handle : function (context, session, args, respond) {
+        context.getSession(args.id).attach(this);
 
-        session.socket.service.registry.sessionRejoin(args.id);
-
-        respond(null, true);
+        respond(null, { status : 'success' });
     }
 };

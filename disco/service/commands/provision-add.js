@@ -1,6 +1,5 @@
 module.exports = {
-    about : 'Add a provisioned endpoint to the registry.',
-    example : 'prod blog mysql-master mysql 192.0.2.39 30241 {"attributes":{"deploy":"2a964d9ab680","zone":"us-west-2c"}}',
+    title : 'Add a provisioned endpoint to the registry.',
     args : {
         environment : {
             type : 'string',
@@ -32,14 +31,26 @@ module.exports = {
             required : false
         }
     },
-    handle : function (session, args, respond) {
-        var registry = session.socket.service.registry;
-
-        if (!registry.hasSession(session)) {
-            throw new Error('Session has not joined registry.');
+    examples : [
+        {
+            args : {
+                environment : "prod",
+                service : "public-blog",
+                role : "wordpress",
+                endpoint : "http",
+                address : {
+                    host : "192.0.2.39",
+                    port : 30241
+                },
+                attributes : {
+                    deploy : "2a964d9ab680",
+                    zone : "us-west-2c"
+                }
+            }
         }
-
-        var pid = registry.addProvisionHandle(session, args);
+    ],
+    handle : function (context, session, args, respond) {
+        var pid = context.addProvision(session, args);
 
         respond(null, { id : pid });
     }

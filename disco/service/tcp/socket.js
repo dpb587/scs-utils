@@ -1,23 +1,25 @@
 var uuid = require('node-uuid');
+var events = require('events');
+var util = require('util');
 
-function Socket(service, socket, options, logger) {
+function Socket(service, raw, options, logger) {
     var that = this;
 
     this.id = uuid.v4();
     this.service = service;
 
     this.raw = socket;
-    this.session = null;
 
     this.createdAt = new Date();
 
-    this.timeoutRecvHandle = null;
-    this.timeoutSendHandle = null;
+    this.heartbeatRecvHandle = null;
+    this.heartbeatSendHandle = null;
 
     this.activeLocal = true;
     this.activeRemote = true;
 
     this.logger = logger;
+    this.loggerTopic = 'server/tcp/socket#' + this.id;
 
     this.raw.setEncoding('utf8');
 
@@ -25,19 +27,20 @@ function Socket(service, socket, options, logger) {
 
     this.raw.on('close', function () {
         that.logger.verbose(
-            'socket#' + that.id,
+            that.loggerTopic,
             'connection closed'
         );
 
         that.activeRemote = false;
 
-        clearInterval(that.timeoutSendHandle);
-        clearTimeout(that.timeoutRecvHandle);
+        clearInterval(that.heartbeatSendHandle);
+        clearTimeout(that.heartbeatRecvHandle);
     });
     this.raw.on('data', function (data) {
         var data = data.replace(/\r\n/g, '\n');
+
         that.logger.silly(
-            'socket#' + that.id + '/recv',
+            that.loggerTopic + '/recv',
             data
         );
 
@@ -46,23 +49,27 @@ function Socket(service, socket, options, logger) {
         if (-1 < data.indexOf('\n')) {
             try {
                 dataBuffer = [ that.handleDataBuffer(dataBuffer.join('')) ];
-            } catch (e) {
-                that.write('e ' + JSON.stringify({ code : e.code, message : e.message }) + '\n');
-
-                that.logger.error('socket#' + that.id + '/error/sent', e.code + ': ' + e.message);
-                that.logger.info(e.stack);
+            } catch (error) {
+                that.sendError(error);
             }
         }
     });
 
-    this.timeoutSendHandle = setInterval(this.sendHeartbeat.bind(this), 25000);
+    this.heartbeatSendHandle = setInterval(this.sendHeartbeat.bind(this), 25000);
+
+    this.logger.silly(
+        this.loggerTopic,
+        'created'
+    );
 }
+
+util.inherits(Socket, events.EventEmitter);
 
 Socket.prototype.resetTimeoutRecv = function () {
     var that = this;
 
-    clearTimeout(this.timeoutRecvHandle);
-    this.timeoutRecvHandle = setTimeout(
+    clearTimeout(this.heartbeatRecvHandle);
+    this.heartbeatRecvHandle = setTimeout(
         function () {
             if (!that.activeRemote || !that.activeLocal) {
                 return;
@@ -71,7 +78,7 @@ Socket.prototype.resetTimeoutRecv = function () {
             that.activeLocal = false;
 
             that.logger.silly(
-                'socket#' + that.id + '/heartbeat',
+                that.loggerTopic + '/heartbeat',
                 'timeout'
             );
 
@@ -83,42 +90,6 @@ Socket.prototype.resetTimeoutRecv = function () {
 
 Socket.prototype.sendHeartbeat = function () {
     this.write('\n');
-}
-
-Socket.prototype.bindSession = function (session) {
-    var that = this;
-
-    this.session = session;
-    this.session.bindSocket(this);
-
-    this.logger.verbose(
-        'socket#' + this.id + '/session',
-        'bound to ' + session.id
-    );
-
-    if (this.session.queuedWrites) {
-        process.nextTick(
-            function () {
-                that.session.queuedWrites.forEach(
-                    function (data) {
-                        that.write(data);
-                    }
-                );
-
-                that.session.queuedWrites = [];
-            }
-        );
-    }
-}
-
-Socket.prototype.unbindSession = function () {
-    this.session.unbindSocket();
-    this.session = null;
-
-    this.logger.verbose(
-        'socket#' + this.id + '/session',
-        'unbound'
-    );
 }
 
 Socket.prototype.handleDataBuffer = function (buffer) {
@@ -135,24 +106,48 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     if (0 == raw.length) {
         this.resetTimeoutRecv();
     } else if (parsed = raw.match(/^r:([^ ]+) ([^ ]+)$/)) {
-        this.session.recvResult(parsed[1], JSON.parse(parsed[2]));
+        this.emit('result', parsed[1], JSON.parse(parsed[2]));
     } else if (parsed = raw.match(/^c:([^ ]+) ([^ ]+)( ([^ ]+))?$/)) {
-        this.session.recvCommand(parsed[1], parsed[2], (parsed[4] && parsed[4].length) ? JSON.parse(parsed[4]) : {});
-        this.resetTimeoutRecv();
+        this.emit('command', parsed[1], parsed[2], (parsed[4] && parsed[4].length) ? JSON.parse(parsed[4]) : {});
     } else if (parsed = raw.match(/^e (.+)$/)) {
-        var error = JSON.parse(parsed[1]);
-
-        this.logger.error('socket#' + this.id + '/error/recv', error.code + ': ' + error.message);
+        this.emit('error', JSON.parse(parsed[1]));
     } else {
         throw new Error('Unrecognized message format.');
     }
 
+    this.resetTimeoutRecv();
+
     return this.handleDataBuffer(remainder);
+}
+
+Socket.prototype.sendError(error) {
+    this.write('e ' + JSON.stringify({ name : error.name, message : error.message }) + '\n');
+
+    this.logger.error(
+        this.loggerTopic + '/error/sent',
+        error.toString()
+    );
+    this.logger.info(
+        this.loggerTopic + '/error/sent',
+        error.stack
+    );
+}
+
+Socket.prototype.sendResult(reqid, error, result) {
+    if (error) {
+        socket.write('r:' + reqid + ' ' + JSON.stringify({ error : { name : error.name, message : error.message } }) + '\n');
+    } else {
+        socket.write('r:' + reqid + ' ' + JSON.stringify({ result : result }) + '\n');
+    }
+}
+
+Socket.prototype.sendCommand(reqid, command, data) {
+    this.write('c:' + reqid + ' ' + command + ' ' + JSON.stringify(data) + '\n');
 }
 
 Socket.prototype.end = function () {
     this.logger.silly(
-        'socket#' + this.id,
+        this.loggerTopic,
         'closing connection...'
     );
 
@@ -161,7 +156,7 @@ Socket.prototype.end = function () {
 
 Socket.prototype.write = function (data) {
     this.logger.silly(
-        'socket#' + this.id + '/send',
+        this.loggerTopic + '/send',
         data
     );
 

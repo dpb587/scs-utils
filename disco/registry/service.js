@@ -1,10 +1,11 @@
 var uuid = require('node-uuid');
+var Session = require('./session');
 
 function getLookupFromOptions(options) {
     return options.environment + '/' + options.service + '/' + options.role + '/' + options.endpoint;
 }
 
-function Registry(options, logger) {
+function Service(options, logger) {
     var options = options || {};
 
     this.options = options;
@@ -16,15 +17,22 @@ function Registry(options, logger) {
     this.discoveryMap = {};
 }
 
-Registry.prototype.sessionJoin = function (session) {
-    this.sessions[session.id] = session;
+Service.prototype.createSession = function (socket, options) {
+    var session = new Session(this, options, this.logger);
+    session.attach(socket);
+
+    return session;
 };
 
-Registry.prototype.hasSession = function (session) {
-    return session.id in this.sessions;
+Service.prototype.destroySession = function (session) {
+    throw new Error('@todo');
+}
+
+Service.prototype.hasSession = function (id) {
+    return id in this.sessions;
 };
 
-Registry.prototype.sessionRejoin = function (id) {
+Service.prototype.getSession = function (id) {
     if (!(id in this.sessions)) {
         throw new Error('Session is not available.');
     }
@@ -36,7 +44,7 @@ Registry.prototype.sessionRejoin = function (id) {
  * provisions
  */
 
-Registry.prototype.addProvisionHandle = function (session, options) {
+Service.prototype.addProvision = function (session, options) {
     // create our handle
     var pid = uuid.v4();
     var phandle = {
@@ -69,7 +77,7 @@ Registry.prototype.addProvisionHandle = function (session, options) {
 
     // log it
     this.logger.verbose(
-        'provision/handle#' + pid,
+        'provision#' + pid,
         'added'
     );
 
@@ -82,7 +90,7 @@ Registry.prototype.addProvisionHandle = function (session, options) {
 
         var rhandle = this.requirementHandles[rid];
 
-        if (!this.doesRequirementWantProvision(rhandle, phandle)) {
+        if (!this.doesProvisionMeetRequirement(phandle, rhandle)) {
             continue;
         }
 
@@ -109,7 +117,7 @@ Registry.prototype.addProvisionHandle = function (session, options) {
     return pid;
 };
 
-Registry.prototype.getProvisionByHandle = function (pid) {
+Service.prototype.getProvision = function (pid) {
     if (!(pid in this.provisionHandles)) {
         throw new Error('Registry does not provide ' + pid);
     }
@@ -117,7 +125,7 @@ Registry.prototype.getProvisionByHandle = function (pid) {
     return this.provisionHandles[pid]
 }
 
-Registry.prototype.dropProvisionHandle = function (pid, callback) {
+Service.prototype.dropProvision = function (pid, callback) {
     var that = this;
 
     if (!(pid in this.provisionHandles)) {
@@ -135,6 +143,11 @@ Registry.prototype.dropProvisionHandle = function (pid, callback) {
         }
 
         delete this.provisionHandles[pid];
+
+        this.logger.verbose(
+            'provision#' + pid,
+            'dropped'
+        );
 
         callback();
     }
@@ -179,8 +192,8 @@ Registry.prototype.dropProvisionHandle = function (pid, callback) {
  * requirements
  */
 
-Registry.prototype.addRequirementHandle = function (session, options) {
-    var id = uuid.v4();
+Service.prototype.addRequirement = function (session, options) {
+    var rid = uuid.v4();
 
     var attributes_re = options.attributes || {};
 
@@ -188,7 +201,7 @@ Registry.prototype.addRequirementHandle = function (session, options) {
         attributes_re[key] = new RegExp(attributes_re[key]);
     }
 
-    this.requirementHandles[id] = {
+    this.requirementHandles[rid] = {
         activeServer : true,
         activeClient : true,
         session : session.id,
@@ -209,37 +222,37 @@ Registry.prototype.addRequirementHandle = function (session, options) {
         };
     }
 
-    this.discoveryMap[lookup].watched_by[id] = true;
+    this.discoveryMap[lookup].watched_by[rid] = true;
 
 
-    return id;
+    return rid;
 };
 
-Registry.prototype.getRequirementByHandle = function (id) {
-    if (!(id in this.requirementHandles)) {
-        throw new Error('Registry does not require ' + id);
+Service.prototype.getRequirement = function (rid) {
+    if (!(rid in this.requirementHandles)) {
+        throw new Error('Registry does not require ' + rid);
     }
 
-    return this.requirementHandles[id]
+    return this.requirementHandles[rid]
 }
 
-Registry.prototype.dropRequirementHandle = function (id) {
-    if (!(id in this.requirementHandles)) {
-        throw new Error('Registry does not require ' + id);
+Service.prototype.dropRequirement = function (rid) {
+    if (!(rid in this.requirementHandles)) {
+        throw new Error('Registry does not require ' + rid);
     }
 
-    var requirement = this.requirementHandles[id];
+    var rhandle = this.requirementHandles[rid];
 
-    if (requirement.activeServer || requirement.activeClient) {
-        throw new Error('Requirement seems to be active: ' + [ requirement.activeServer ? 'server' : '', requirement.activeClient ? 'client' : '' ].join(','));
+    if (rhandle.activeServer || rhandle.activeClient) {
+        throw new Error('Requirement seems to be active: ' + [ rhandle.activeServer ? 'server' : '', rhandle.activeClient ? 'client' : '' ].join(','));
     }
 
-    delete this.requirementHandles[id];
+    delete this.requirementHandles[rid];
 };
 
-Registry.prototype.discoverRequirements = function (rid) {
+Service.prototype.discoverRequirements = function (rid) {
     var that = this;
-    var rhandle = this.getRequirementByHandle(rid);
+    var rhandle = this.getRequirement(rid);
     var lookup = getLookupFromOptions(rhandle);
 
     if (!(lookup in this.discoveryMap)) {
@@ -253,9 +266,9 @@ Registry.prototype.discoverRequirements = function (rid) {
 
     Object.keys(endpointMap.provided_by).forEach(
         function (pid) {
-            var phandle = that.getProvisionByHandle(pid);
+            var phandle = that.getProvision(pid);
 
-            if (!that.doesRequirementWantProvision(rhandle, phandle)) {
+            if (!that.doesProvisionMeetRequirement(phandle, rhandle)) {
                 return;
             }
 
@@ -272,7 +285,7 @@ Registry.prototype.discoverRequirements = function (rid) {
     return matches;
 }
 
-Registry.prototype.doesRequirementWantProvision = function (rhandle, phandle) {
+Service.prototype.doesProvisionMeetRequirement = function (phandle, rhandle) {
     if (!phandle.activeServer || !phandle.activeClient) {
         return false;
     }
@@ -288,4 +301,4 @@ Registry.prototype.doesRequirementWantProvision = function (rhandle, phandle) {
     return true;
 }
 
-module.exports = Registry;
+module.exports = Service;

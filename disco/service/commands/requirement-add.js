@@ -1,6 +1,5 @@
 module.exports = {
     about : 'Add a required endpoint to the registry.',
-    example : 'prod blog mysql-master mysql {"attributes":{"zone":"us-west-2c"}}',
     args : {
         environment : {
             type : 'string',
@@ -24,15 +23,19 @@ module.exports = {
             required : false
         }
     },
-    handle : function (session, args, respond) {
-        var registry = session.socket.service.registry;
-
-        if (!registry.hasSession(session)) {
-            throw new Error('Session has not joined registry.');
+    examples : [
+        {
+            args : {
+                environment : "prod",
+                service : "public-blog",
+                role : "mysql-master",
+                endpoint : "mysql"
+            }
         }
-
-        var rid = registry.addRequirementHandle(session, args);
-        var endpoints = registry.discoverRequirements(rid);
+    ],
+    handle : function (context, session, args, respond) {
+        var rid = context.addRequirement(session, args);
+        var endpoints = context.discoverRequirements(rid);
 
         respond(null, { id : rid, endpoints : endpoints });
     }

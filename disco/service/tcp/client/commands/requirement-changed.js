@@ -19,7 +19,7 @@ module.exports = {
             title : 'Provisioning details'
         }
     },
-    handle : function (session, args, respond) {
+    handle : function (context, session, args, respond) {
         var client = session.socket.service;
         var responded = false;
 

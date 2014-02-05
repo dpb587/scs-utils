@@ -1,10 +1,9 @@
 module.exports = {
     about : 'Drop a provisioned endpoint from the registry.',
-    example : '6dca1994-bfb4-4870-936c-917bcf2eddfb',
     args : {
-        handle : {
+        id : {
             type : 'string',
-            title : 'Provision Handle'
+            title : 'Provision ID'
         },
         wait : {
             type : 'integer',
@@ -12,21 +11,22 @@ module.exports = {
             required : false
         }
     },
-    handle : function (session, args, respond) {
-        var registry = session.socket.service.registry;
-
-        if (!registry.hasSession(session)) {
-            throw new Error('Session has not joined registry.');
+    examples : [
+        {
+            args : {
+                id : "6dca1994-bfb4-4870-936c-917bcf2eddfb"
+            }
         }
-
+    ],
+    handle : function (context, session, args, respond) {
         var responded = false;
         var responseTimeout = null;
 
-        var phandle = registry.getProvisionByHandle(args.handle);
+        var phandle = context.getProvision(args.id);
         phandle.activeClient = false;
 
-        registry.dropProvisionHandle(
-            args.handle,
+        context.dropProvisionHandle(
+            args.id,
             function () {
                 handle.activeServer = false;
 

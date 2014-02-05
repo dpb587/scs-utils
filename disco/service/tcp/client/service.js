@@ -6,16 +6,20 @@ var commands = require('./commands');
 
 function Service(options, logger) {
     var options = options || {};
+
     options.server = options.server || {};
     options.server.host = options.server.host || '127.0.0.1';
     options.server.port = options.server.port || '9640';
+
     options.join = options.join || {};
     options.join.timeout = 30000;
+
     options.environment = options.environment || 'default';
     options.service = options.service || 'default';
     options.role = options.role || 'default';
 
     this.options = options;
+
     this.logger = logger;
 
     this.activeLocal = false;
