@@ -18,6 +18,7 @@ module.exports.createMockSocket = function (options) {
     return new Socket(
         new TcpService(null, null, logger),
         raw,
+        null,
         options,
         logger
     );

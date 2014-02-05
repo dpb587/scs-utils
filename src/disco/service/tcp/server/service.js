@@ -56,7 +56,7 @@ Service.prototype.start = function (callback) {
             'connection from ' + raw.remoteAddress + ':' + raw.remotePort
         );
 
-        var socket = new Socket(that, raw, {}, that.logger);
+        var socket = new Socket(that, raw, that.registry, {}, that.logger);
 
         that.sockets[socket.id] = socket;
     });

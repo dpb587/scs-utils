@@ -2,7 +2,7 @@ var uuid = require('node-uuid');
 var events = require('events');
 var util = require('util');
 
-function Socket(service, raw, options, logger) {
+function Socket(service, raw, context, options, logger) {
     var that = this;
 
     options = options || {};
@@ -24,6 +24,7 @@ function Socket(service, raw, options, logger) {
     this.activeRemote = true;
 
     this.session = null;
+    this.context = context;
 
     this.logger = logger;
     this.loggerTopic = 'server/tcp/socket#' + this.id;
@@ -228,7 +229,7 @@ Socket.prototype.recvCommand = function (msgid, command, args) {
     try {
         cmdrun.handle.call(
             this,
-            this.service.registry,
+            this.context,
             this.getSession(),
             args,
             respond
