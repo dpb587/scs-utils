@@ -101,8 +101,12 @@ Service.prototype.cleanupCommandArgs = function (cmdrun, args) {
             if (cmdargs[arg].required) {
                 throw new SyntaxError('Argument "' + arg + '" is expected.');
             } else {
-                args[arg] = null;
+                args[arg] = 'defaultValue' in cmdargs[arg] ? cmdargs[arg].defaultValue : null;
             }
+        }
+
+        if (('type' in cmdargs[arg]) && (null !== args[arg]) && (cmdargs[arg].type != typeof args[arg])) {
+            throw new SyntaxError('Argument "' + arg + '" should be of type ' + cmdargs[arg].type + ' (' + typeof args[arg] + ' provided)');
         }
     }
 

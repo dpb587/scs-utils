@@ -3,6 +3,11 @@ module.exports = {
     handle : function (context, session, args, respond) {
         session.detach(this);
 
-        respond(null, { status : 'success' });
+        respond(
+            null,
+            {
+                ack : true
+            }
+        );
     }
 };

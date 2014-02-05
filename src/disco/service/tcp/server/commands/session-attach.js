@@ -11,6 +11,11 @@ module.exports = {
     handle : function (context, session, args, respond) {
         context.getSession(args.id).attach(this);
 
-        respond(null, { status : 'success' });
+        respond(
+            null,
+            {
+                ack : true
+            }
+        );
     }
 };

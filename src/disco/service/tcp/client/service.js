@@ -7,8 +7,8 @@ function Service(options, logger) {
     var options = options || {};
 
     options.server = options.server || {};
-    options.server.host = options.server.host || '127.0.0.1';
-    options.server.port = options.server.port || '9640';
+    options.server.host = 'host' in options.server ? options.server.host : '127.0.0.1';
+    options.server.port = 'port' in options.server ? options.server.port : '9640';
 
     options.join = options.join || {};
     options.join.timeout = 30000;

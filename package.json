@@ -9,5 +9,9 @@
     "devDependencies" : {
         "istanbul" : "0.2.3",
         "mocha" : "1.17.1"
+    },
+    "scripts" : {
+        "coverage" : "rm -fr build/coverage && mkdir -p build/coverage && istanbul cover --dir build/coverage _mocha -- --reporter spec --recursive test/disco",
+        "test" : "mocha --reporter spec --recursive test/disco"
     }
 }

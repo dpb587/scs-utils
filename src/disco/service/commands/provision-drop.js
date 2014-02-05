@@ -6,7 +6,7 @@ module.exports = {
             title : 'Provision ID'
         },
         wait : {
-            type : 'integer',
+            type : 'number',
             title : 'Wait Timeout (seconds)',
             required : false
         }
@@ -45,7 +45,12 @@ module.exports = {
 
         if (null === args.wait) {
             responded = true;
-            respond(null, { success : true });
+            respond(
+                null,
+                {
+                    ack : true
+                }
+            );
         } else if (0 < args.wait) {
             responseTimeout = setTimeout(
                 function () {

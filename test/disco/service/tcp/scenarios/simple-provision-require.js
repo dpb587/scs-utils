@@ -7,7 +7,6 @@ var Commander = require('../../../../../src/disco/service/commander');
 var logger = require('npmlog');
 logger.level = 'silent';
 
-
 function startSecondSocket (tcp, first, firstTriggers) {
     var ids = {};
     var second = net.createConnection(
@@ -34,13 +33,7 @@ function startSecondSocket (tcp, first, firstTriggers) {
             ids.provision = match[1];
         },
         function (data) {
-            var match = /r:3 {"result":{"success":true}}\n/.exec(data);
-            if (!match) throw Error('Unexpected response: ' + data);
-
-            second.write('c:4 registry.leave\n');
-        },
-        function (data) {
-            var match = /r:4 {"result":{"timed_out":false}}\n/.exec(data);
+            var match = /r:3 {"result":{"timed_out":false}}\n/.exec(data);
             if (!match) throw Error('Unexpected response: ' + data);
 
             second.end();
@@ -55,7 +48,7 @@ function startSecondSocket (tcp, first, firstTriggers) {
 
     return {
         removeProvision : function () {
-            second.write('c:3 provision.drop {"id":"' + ids.provision + '"}\n');
+            second.write('c:3 registry.leave\n');
 
             // first client should receive notification
         }
@@ -64,7 +57,7 @@ function startSecondSocket (tcp, first, firstTriggers) {
 
 describe('disco/service/tcp/scenario/simple-provision-require', function () {
     it('runs', function (done) {
-        this.timeout(10000);
+        this.timeout(5000);
 
         var registry = new RegistryService(null, logger);
         var tcp = new TcpService(

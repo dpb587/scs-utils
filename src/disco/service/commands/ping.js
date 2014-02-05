@@ -5,16 +5,25 @@ module.exports = {
             type : 'string',
             required : false,
             title : 'A message the server should respond with.'
+        },
+        delay : {
+            type : 'number',
+            required : false,
+            title : 'Delay the reply by seconds.'
         }
     },
     handle : function (context, session, args, respond) {
-        respond(
-            null,
-            {
-                message : args.reply,
-                session : session ? session.id : false,
-                remote : this.remoteAddress + ':' + this.remotePort
-            }
-        );
+        function send() {
+            respond(
+                null,
+                {
+                    message : args.reply,
+                    session : session ? session.id : false,
+                    remote : this.remoteAddress + ':' + this.remotePort
+                }
+            );
+        }
+
+        setTimeout(send.bind(this), args.delay || 0);
     }
 };

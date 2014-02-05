@@ -25,8 +25,48 @@ Service.prototype.createSession = function (options) {
     return session;
 };
 
-Service.prototype.destroySession = function (session) {
-    //throw new Error('@todo');
+Service.prototype.destroySession = function (id, callback) {
+    var that = this;
+    var remain = 0;
+
+    function finish() {
+        if (remain > 0) {
+            return;
+        }
+
+        callback();
+    }
+
+    Object.keys(this.provisionHandles).forEach(
+        function (pid) {
+            if (id != that.provisionHandles[pid].session) {
+                return;
+            }
+
+            remain += 1;
+
+            that.dropProvision(
+                pid,
+                function () {
+                    remain -= 1;
+
+                    finish();
+                }
+            );
+        }
+    );
+
+    Object.keys(this.requirementHandles).forEach(
+        function (rid) {
+            if (id != that.requirementHandles[rid].session) {
+                return;
+            }
+
+            that.dropRequirement(rid);
+        }
+    );
+
+    finish();
 }
 
 Service.prototype.hasSession = function (id) {
