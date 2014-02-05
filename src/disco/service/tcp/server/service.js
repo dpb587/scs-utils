@@ -12,7 +12,7 @@ function createSocket(service, raw) {
             ephemeralCallbacks[msgid](data);
             delete ephemeralCallbacks[msgid];
         } else if (socket.hasSession()) {
-            socket.session.recvResult(msgid, data);
+            socket.session.recvResult(msgid, result);
         } else {
             throw new Error('Received a result for an unknown request.');
         }
@@ -26,34 +26,48 @@ function createSocket(service, raw) {
     socket.on('command', function (msgid, command, args) {
         var commands = service.commands[socket.hasSession() ? 'session' : 'ephemeral'];
 
-        if (!(cmd in commands)) {
-            throw new Error('The command "' + cmd + '" is not available.');
+        if (!(command in commands)) {
+            throw new Error('The command "' + command + '" is not available.');
         }
 
-        var cmdrun = commands[cmd];
+        var cmdrun = commands[command];
         args = service.cleanupCommandArgs(cmdrun, args);
 
+        var session = socket.getSession();
+
+        if (session) {
+            function respond(error, result) {
+                socket.getSession().sendResult(msgid, error, result);
+            }
+        } else {
+            function respond(error, result) {
+                socket.sendResult(msgid, error, result);
+            }
+        }
+
         try {
-            cmdrun.handle.call(this, service.registry, socket.getSession(), args, respond);
+            cmdrun.handle.call(
+                this,
+                service.registry,
+                socket.getSession(),
+                args,
+                respond
+            );
         } catch (error) {
             socket.logger.error(
-                socket.loggerTopic + '/command#' + cmd,
+                socket.loggerTopic + '/command#' + command,
                 error.code + ': ' + error.message
             );
             socket.logger.info(
-                socket.loggerTopic + '/command#' + cmd,
+                socket.loggerTopic + '/command#' + command,
                 error.stack
             );
 
-            respond(error);
+            socket.sendError(error);
         }
     });
 
-    var wrapped = new Socket(service, socket, null, service.logger);
-
-    wrapped.bindSession(new Session(uuid.v4(), Commands, service.logger));
-
-    service.sockets[wrapped.id] = wrapped;
+    return socket;
 }
 
 function Service(registry, commander, options, logger) {
@@ -62,8 +76,8 @@ function Service(registry, commander, options, logger) {
     options.heartbeat = options.heartbeat || 15000;
 
     options.listen = options.listen || {};
-    options.listen.host = options.listen.host || '127.0.0.1';
-    options.listen.port = options.listen.port || '9640';
+    options.listen.host = 'host' in options.listen ? options.listen.host : '127.0.0.1';
+    options.listen.port = 'port' in options.listen ? options.listen.port : '9640';
 
     this.registry = registry;
     this.commander = commander;
@@ -72,7 +86,7 @@ function Service(registry, commander, options, logger) {
     this.logger = logger;
     this.loggerTopic = 'server/tcp#' + this.options.listen.host + ':' + this.options.listen.port;
 
-    this.server = null;
+    this.raw = null;
 
     this.sockets = {};
 
@@ -80,28 +94,26 @@ function Service(registry, commander, options, logger) {
 }
 
 Service.prototype.cleanupCommandArgs = function (cmdrun, args) {
-    if ('args' in cmdrun) {
-        for (var arg in cmdrun.args) {
-            if (!(arg in args)) {
-                if (cmdrun.args[arg].required) {
-                    throw new SyntaxError('Argument "' + arg + '" is expected.');
-                } else {
-                    args[arg] = null;
-                }
+    var cmdargs = cmdrun.args || {};
+
+    for (var arg in cmdargs) {
+        if (!(arg in args)) {
+            if (cmdargs[arg].required) {
+                throw new SyntaxError('Argument "' + arg + '" is expected.');
+            } else {
+                args[arg] = null;
             }
         }
+    }
 
-        for (var arg in args) {
-            if (!(arg in cmdrun.args)) {
-                throw new SyntaxError('Argument "' + arg + '" is not expected.');
-            }
+    for (var arg in args) {
+        if (!(arg in cmdargs)) {
+            throw new SyntaxError('Argument "' + arg + '" is not expected.');
         }
+    }
 
-        if ('validate' in cmdrun) {
-            args = cmdrun.validate(args);
-        }
-    } else if (0 < Object.keys(args).length) {
-        throw new SyntaxError('Arguments are not expected.');
+    if ('validate' in cmdrun) {
+        args = cmdrun.validate(args);
     }
 
     return args;
@@ -110,18 +122,24 @@ Service.prototype.cleanupCommandArgs = function (cmdrun, args) {
 Service.prototype.start = function (callback) {
     var that = this;
 
-    if (this.server) {
+    if (this.raw) {
         callback();
+
+        return;
     }
 
-    this.server = new net.createServer();
-    this.server.on('listening', function () {
+    var listening = false;
+
+    this.raw = new net.createServer();
+    this.raw.on('listening', function () {
+        listening = true;
+
         that.logger.info(
             that.loggerTopic,
             'started'
         );
     });
-    this.server.on('connection', function (socket) {
+    this.raw.on('connection', function (socket) {
         var address = socket.address();
 
         that.logger.verbose(
@@ -129,15 +147,17 @@ Service.prototype.start = function (callback) {
             'connection from ' + socket.remoteAddress + ':' + socket.remotePort
         );
 
-        attachSocket(that, socket);
+        var socket = createSocket(that, socket);
+
+        that.sockets[socket.id] = socket;
     });
-    this.server.on('close', function () {
+    this.raw.on('close', function () {
         that.logger.verbose(
             that.loggerTopic,
             'stopped'
         );
     });
-    this.server.on('error', function (error) {
+    this.raw.on('error', function (error) {
         that.logger.error(
             that.loggerTopic,
             error.message
@@ -147,28 +167,34 @@ Service.prototype.start = function (callback) {
             error.stack
         );
 
-        throw error;
+        if (!listening) {
+            callback(error);
+        }
     });
 
-    if (callback) this.server.on('listening', callback);
+    if (callback) {
+        this.raw.on('listening', callback);
+    }
 
     this.logger.silly(
         this.loggerTopic,
         'starting...'
     );
 
-    this.server.listen(this.options.listen.port, this.options.listen.host);
+    this.raw.listen(this.options.listen.port, this.options.listen.host);
 };
 
 Service.prototype.stop = function (callback) {
-    if (callback) this.server.on('close', callback);
+    if (callback) {
+        this.raw.on('close', callback);
+    }
 
     this.logger.silly(
         this.loggerTopic,
         'stopping...'
     );
 
-    this.server.close();
+    this.raw.close();
 }
 
 module.exports = Service;

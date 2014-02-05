@@ -17,15 +17,12 @@ module.exports = {
         var handle = context.getRequirement(args.id);
         handle.activeClient = false;
 
-        socket.context.unregisterRequirement(
-            socket.session,
-            args.id,
-            function () {
-                handle.activeServer = false;
+        context.dropRequirement(args.id);
 
-                socket.session.dropRequirement(args.id);
-
-                respond(null, true);
+        respond(
+            null,
+            {
+                ack : true
             }
         );
     }

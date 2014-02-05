@@ -37,6 +37,12 @@ module.exports = {
         var rid = context.addRequirement(session, args);
         var endpoints = context.discoverRequirements(rid);
 
-        respond(null, { id : rid, endpoints : endpoints });
+        respond(
+            null,
+            {
+                id : rid,
+                endpoints : endpoints
+            }
+        );
     }
 };

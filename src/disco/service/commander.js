@@ -10,7 +10,7 @@ Commander.prototype.getCommands = function (transportCommands) {
         session : serviceCommands.session || {}
     };
 
-    if (ephemeral in transportCommands) {
+    if ('ephemeral' in transportCommands) {
         Object.keys(transportCommands.ephemeral).forEach(
             function (key) {
                 commands.ephemeral[key] = transportCommands.ephemeral[key];
@@ -18,7 +18,7 @@ Commander.prototype.getCommands = function (transportCommands) {
         );
     }
 
-    if (session in transportCommands) {
+    if ('session' in transportCommands) {
         Object.keys(transportCommands.session).forEach(
             function (key) {
                 commands.session[key] = transportCommands.session[key];

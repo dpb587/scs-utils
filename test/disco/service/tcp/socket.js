@@ -1,31 +1,13 @@
 var assert = require('assert');
-var Socket = require('../../../../disco/service/tcp/socket');
-var events = require('events');
+var TestUtilSocket = require('../_test/socket');
 
 var logger = require('npmlog');
 logger.level = 'silent';
 
-function createMockSocket() {
-    var raw = new events.EventEmitter();
-    raw.setEncoding = function () {}
-    raw.write = function (data) {
-        this.emit('_write', data);
-    };
-
-    return new Socket(
-        null,
-        raw,
-        {
-            heartbeatSend : false
-        },
-        logger
-    );
-}
-
 describe('disco/service/tcp/socket', function () {
     describe('reads data stream', function () {
         it('accepts results', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.on('result', function (msgid, data) {
                 assert.equal('0', msgid);
@@ -38,7 +20,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('accepts commands w/ args', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.on('command', function (msgid, command, args) {
                 assert.equal('1', msgid);
@@ -52,7 +34,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('accepts commands w/o args', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.on('command', function (msgid, command, args) {
                 assert.equal('2', msgid);
@@ -66,7 +48,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('accepts errors', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.on('error', function (error) {
                 assert.equal(error.name, 'Error');
@@ -79,7 +61,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('cleanly errors', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, 'e {"name":"Error","message":"Unrecognized message format."}\n');
@@ -91,7 +73,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('parses split packets', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.on('error', function (error) {
                 assert.equal(error.name, 'Error');
@@ -105,7 +87,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('parses combined packets', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
             var first = false;
 
             socket.on('error', function (error) {
@@ -130,7 +112,7 @@ describe('disco/service/tcp/socket', function () {
 
     describe('writes data stream', function () {
         it('sends errors', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, 'e {"name":"Error","message":"ohno"}\n');
@@ -142,7 +124,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('sends results w/ error)', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, 'r:2 {"error":{"name":"Error","message":"grr"}}\n');
@@ -154,7 +136,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('sends results w/o error', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, 'r:3 {"result":{"ack":true}}\n');
@@ -166,7 +148,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('sends commands w/ args', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, 'c:4 util.ping {"reply":"works"}\n');
@@ -178,7 +160,7 @@ describe('disco/service/tcp/socket', function () {
         });
 
         it('sends commands w/o args', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, 'c:5 util.ping\n');
@@ -192,7 +174,7 @@ describe('disco/service/tcp/socket', function () {
 
     describe('.sendHeartbeat', function () {
         it('works', function (done) {
-            var socket = createMockSocket();
+            var socket = TestUtilSocket.createMockSocket();
 
             socket.raw.on('_write', function (data) {
                 assert.equal(data, '\n');

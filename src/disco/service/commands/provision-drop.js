@@ -25,15 +25,20 @@ module.exports = {
         var phandle = context.getProvision(args.id);
         phandle.activeClient = false;
 
-        context.dropProvisionHandle(
+        context.dropProvision(
             args.id,
             function () {
-                handle.activeServer = false;
+                phandle.activeServer = false;
 
                 if (!responded) {
                     clearTimeout(responseTimeout);
 
-                    respond(null, { success : true, timed_out : false });
+                    respond(
+                        null,
+                        {
+                            timed_out : false
+                        }
+                    );
                 }
             }
         );
@@ -45,7 +50,12 @@ module.exports = {
             responseTimeout = setTimeout(
                 function () {
                     responded = true;
-                    respond(null, { success : true, timed_out : true });
+                    respond(
+                        null,
+                        {
+                            timed_out : true
+                        }
+                    );
                 },
                 1000 * args.wait
             );

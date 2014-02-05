@@ -13,7 +13,10 @@ module.exports = {
         }
     },
     handle : function (context, session, args, respond) {
-        session = context.createSession(this, args.options);
+        session = context.createSession(args.options);
+        session.attach(this);
+
+        this.setSession(session);
 
         respond(null, { id : session.id });
     }

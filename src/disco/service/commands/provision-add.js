@@ -52,6 +52,11 @@ module.exports = {
     handle : function (context, session, args, respond) {
         var pid = context.addProvision(session, args);
 
-        respond(null, { id : pid });
+        respond(
+            null,
+            {
+                id : pid
+            }
+        );
     }
 };

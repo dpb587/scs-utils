@@ -17,9 +17,8 @@ function Service(options, logger) {
     this.discoveryMap = {};
 }
 
-Service.prototype.createSession = function (socket, options) {
+Service.prototype.createSession = function (options) {
     var session = new Session(this, options, this.logger);
-    session.attach(socket);
 
     this.sessions[session.id] = session;
     
@@ -27,7 +26,7 @@ Service.prototype.createSession = function (socket, options) {
 };
 
 Service.prototype.destroySession = function (session) {
-    throw new Error('@todo');
+    //throw new Error('@todo');
 }
 
 Service.prototype.hasSession = function (id) {
@@ -52,17 +51,18 @@ Service.prototype.addProvision = function (session, options) {
     // create our handle
     var pid = uuid.v4();
     var phandle = {
-        activeServer : true,
-        activeClient : true,
-        session : session.id,
         environment : options.environment,
         service : options.service,
         role : options.role,
         endpoint : options.endpoint,
-        stat_created : new Date(),
         address : options.address,
         attributes : options.attributes || {},
-        required_by : {}
+
+        activeServer : true,
+        activeClient : true,
+        session : session.id,
+        required_by : {},
+        stat_created_at : new Date(),
     };
 
     this.provisionHandles[pid] = phandle;
@@ -85,6 +85,14 @@ Service.prototype.addProvision = function (session, options) {
         'added'
     );
 
+    that.sendNewProvisionToRequirements(pid, phandle);
+
+    return pid;
+}
+
+Service.prototype.sendNewProvisionToRequirements = function (pid, phandle) {
+    var lookup = getLookupFromOptions(phandle);
+
     // see if anyone cares about this
     for (var rid in this.discoveryMap[lookup].watched_by) {
         if (!this.discoveryMap[lookup].watched_by[rid]) {
@@ -100,6 +108,7 @@ Service.prototype.addProvision = function (session, options) {
 
         // update and notify
         phandle.required_by[rid] = true;
+        rhandle.provided_by[pid] = true;
 
         this.sessions[rhandle.session].sendCommand(
             'requirement.changed',
@@ -115,6 +124,7 @@ Service.prototype.addProvision = function (session, options) {
             function (error, result) {
                 if (error) {
                     delete phandle.required_by[rid];
+                    delete rhandle.provided_by[pid];
 
                     that.logger.error(
                         that.loggerTopic,
@@ -139,11 +149,7 @@ Service.prototype.getProvision = function (pid) {
 Service.prototype.dropProvision = function (pid, callback) {
     var that = this;
 
-    if (!(pid in this.provisionHandles)) {
-        throw new Error('Registry does not provide ' + pid);
-    }
-
-    var phandle = this.provisionHandles[pid];
+    var phandle = this.getProvision(pid);
     phandle.activeServer = false;
 
     var ackrem = 0;
@@ -153,9 +159,9 @@ Service.prototype.dropProvision = function (pid, callback) {
             return;
         }
 
-        delete this.provisionHandles[pid];
+        delete that.provisionHandles[pid];
 
-        this.logger.verbose(
+        that.logger.verbose(
             'provision#' + pid,
             'dropped'
         );
@@ -170,9 +176,10 @@ Service.prototype.dropProvision = function (pid, callback) {
                 return;
             }
 
-            phandle.required_by[rid] = false;
+            var rhandle = that.getRequirement(rid);
 
-            var rhandle = that.requirementHandles[rid];
+            phandle.required_by[rid] = false;
+            rhandle.provided_by[pid] = false;
 
             that.sessions[rhandle.session].sendCommand(
                 'requirement.changed',
@@ -189,6 +196,7 @@ Service.prototype.dropProvision = function (pid, callback) {
                     ackrem -= 1;
 
                     delete phandle.required_by[rid];
+                    delete rhandle.provided_by[pid];
 
                     readyCallback();
                 }
@@ -197,6 +205,8 @@ Service.prototype.dropProvision = function (pid, callback) {
             ackrem += 1;
         }
     );
+
+    readyCallback();
 }
 
 /**
@@ -206,22 +216,26 @@ Service.prototype.dropProvision = function (pid, callback) {
 Service.prototype.addRequirement = function (session, options) {
     var rid = uuid.v4();
 
-    var attributes_re = options.attributes || {};
+    var attributes = options.attributes || {};
+    var attributes_re = {};
 
-    for (var key in attributes_re) {
-        attributes_re[key] = new RegExp(attributes_re[key]);
+    for (var key in attributes) {
+        attributes_re[key] = new RegExp(attributes[key]);
     }
 
     this.requirementHandles[rid] = {
-        activeServer : true,
-        activeClient : true,
-        session : session.id,
         environment : options.environment,
         service : options.service,
         role : options.role,
         endpoint : options.endpoint,
-        attributes : options.attributes || {},
-        attributes_re : options.attributes_re
+        attributes : attributes,
+
+        activeServer : true,
+        activeClient : true,
+        session : session.id,
+        attributes_re : attributes_re,
+        stat_created_at : new Date(),
+        provided_by : {}
     };
 
     var lookup = getLookupFromOptions(options);
@@ -235,7 +249,6 @@ Service.prototype.addRequirement = function (session, options) {
 
     this.discoveryMap[lookup].watched_by[rid] = true;
 
-
     return rid;
 };
 
@@ -248,15 +261,15 @@ Service.prototype.getRequirement = function (rid) {
 }
 
 Service.prototype.dropRequirement = function (rid) {
-    if (!(rid in this.requirementHandles)) {
-        throw new Error('Registry does not require ' + rid);
-    }
+    var that = this;
 
-    var rhandle = this.requirementHandles[rid];
+    var rhandle = this.getRequirement(rid);
 
-    if (rhandle.activeServer || rhandle.activeClient) {
-        throw new Error('Requirement seems to be active: ' + [ rhandle.activeServer ? 'server' : '', rhandle.activeClient ? 'client' : '' ].join(','));
-    }
+    Object.keys(rhandle.provided_by).forEach(
+        function (pid) {
+            delete that.getProvision(pid).required_by[rid];
+        }
+    );
 
     delete this.requirementHandles[rid];
 };
@@ -265,11 +278,6 @@ Service.prototype.discoverRequirements = function (rid) {
     var that = this;
     var rhandle = this.getRequirement(rid);
     var lookup = getLookupFromOptions(rhandle);
-
-    if (!(lookup in this.discoveryMap)) {
-        that.logger.error('asdf');
-        return {};
-    }
 
     var endpointMap = this.discoveryMap[lookup];
 
@@ -284,12 +292,13 @@ Service.prototype.discoverRequirements = function (rid) {
             }
 
             matches.push({
-                handle : pid,
+                id : pid,
                 address : phandle.address,
                 attributes : phandle.attributes
             });
 
             phandle.required_by[rid] = true;
+            rhandle.provided_by[pid] = true;
         }
     );
 
@@ -301,10 +310,10 @@ Service.prototype.doesProvisionMeetRequirement = function (phandle, rhandle) {
         return false;
     }
 
-    for (var key in rhandle.attributes) {
+    for (var key in rhandle.attributes_re) {
         if (!(key in phandle.attributes)) {
             return false;
-        } else if (!rhandle.attributes[key].match(phandle.attributes[key])) {
+        } else if (!rhandle.attributes_re[key].exec(phandle.attributes[key])) {
             return false;
         }
     }

@@ -2,7 +2,7 @@ var SocketBase = require('../socket');
 var util = require('util');
 
 function Socket() {
-    Socket.apply(this, arguments);
+    SocketBase.apply(this, arguments);
 
     this.session = null;
 }

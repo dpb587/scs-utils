@@ -1,6 +1,5 @@
 var net = require('net');
 var uuid = require('node-uuid');
-var Session = require('../session');
 var Socket = require('../socket');
 var commands = require('./commands');
 
@@ -26,7 +25,6 @@ function Service(options, logger) {
     this.activeRemote = false;
 
     this.socket = null;
-    this.session = new Session('anonymous', commands, logger);
 
     this.reconnectBackoff = 0;
     this.reconnectTimer = null;

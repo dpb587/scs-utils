@@ -51,7 +51,7 @@ Session.prototype.pushSocket = function (method, args) {
 
         this.logger.silly(
             this.loggerTopic + '/queued',
-            method + ' ' + JSON.encode(args)
+            method + ' ' + JSON.stringify(args)
         );
     }
 };
@@ -59,9 +59,9 @@ Session.prototype.pushSocket = function (method, args) {
 Session.prototype.sendCommand = function (command, data, callback) {
     var msgid = uuid.v4();
 
-    this.commandCallbacks[msgid] = cbref;
+    this.commandCallbacks[msgid] = callback;
 
-    this.pushWrite('sendCommand', [ msgid, command, data ]);
+    this.pushSocket('sendCommand', [ msgid, command, data ]);
 };
 
 Session.prototype.recvResult = function (msgid, result) {
@@ -74,10 +74,10 @@ Session.prototype.recvResult = function (msgid, result) {
         throw new Error('Message identifier is not recognized (' + msgid + ')');
     }
 
-    var cbref = this.commandCallbacks[msgid];
+    var callback = this.commandCallbacks[msgid];
     delete this.commandCallbacks[msgid];
 
-    cbref(
+    callback(
         ('error' in result) ? result.error : null,
         ('result' in result) ? result.result : null
     );
