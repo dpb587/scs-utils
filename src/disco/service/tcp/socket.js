@@ -139,9 +139,9 @@ Socket.prototype.handleDataBuffer = function (raw) {
 
     if (0 == raw.length) {
         // just a heartbeat
-    } else if (parsed = raw.match(/^r:([^ ]+) ([^ ]+)$/)) {
+    } else if (parsed = raw.match(/^r:([^ ]+) (.+)$/)) {
         this.recvResult(parsed[1], JSON.parse(parsed[2]));
-    } else if (parsed = raw.match(/^c:([^ ]+) ([^ ]+)( ([^ ]+))?$/)) {
+    } else if (parsed = raw.match(/^c:([^ ]+) ([^ ]+)( (.+))?$/)) {
         this.recvCommand(parsed[1], parsed[2], (parsed[4] && parsed[4].length) ? JSON.parse(parsed[4]) : {});
     } else if (parsed = raw.match(/^e (.+)$/)) {
         this.recvError(JSON.parse(parsed[1]));

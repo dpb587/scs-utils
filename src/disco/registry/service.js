@@ -190,6 +190,8 @@ Service.prototype.dropProvision = function (pid, callback) {
     var that = this;
 
     var phandle = this.getProvision(pid);
+    var lookup = getLookupFromOptions(phandle);
+
     phandle.activeServer = false;
 
     var ackrem = 0;
@@ -200,6 +202,7 @@ Service.prototype.dropProvision = function (pid, callback) {
         }
 
         delete that.provisionHandles[pid];
+        delete that.discoveryMap[lookup].provided_by[pid];
 
         that.logger.verbose(
             'provision#' + pid,
@@ -304,6 +307,9 @@ Service.prototype.dropRequirement = function (rid) {
     var that = this;
 
     var rhandle = this.getRequirement(rid);
+    var lookup = getLookupFromOptions(rhandle);
+
+    delete this.discoveryMap[lookup].watched_by[rid];
 
     Object.keys(rhandle.provided_by).forEach(
         function (pid) {
