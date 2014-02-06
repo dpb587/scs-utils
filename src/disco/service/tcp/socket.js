@@ -34,7 +34,7 @@ function Socket(service, raw, context, options, logger) {
 
     this.raw.setEncoding('utf8');
 
-    var dataBuffer = [];
+    var dataBuffer = '';
 
     this.raw.on('close', function () {
         that.logger.verbose(
@@ -65,11 +65,15 @@ function Socket(service, raw, context, options, logger) {
             data
         );
 
-        dataBuffer.push(data);
+        dataBuffer += data;
+        var pos;
 
-        if (-1 < data.indexOf('\n')) {
+        while (-1 < (pos = dataBuffer.indexOf('\n'))) {
+            var dataSegment = dataBuffer.substring(0, pos);
+            dataBuffer = dataBuffer.substring(pos + 1);
+
             try {
-                dataBuffer = [ that.handleDataBuffer(dataBuffer.join('')) ];
+                that.handleDataBuffer(dataSegment);
             } catch (error) {
                 that.sendError(error);
             }
@@ -130,15 +134,7 @@ Socket.prototype.sendHeartbeat = function () {
     this.write('\n');
 }
 
-Socket.prototype.handleDataBuffer = function (buffer) {
-    var thru = buffer.indexOf('\n');
-
-    if (-1 == thru) {
-        return buffer;
-    }
-
-    var raw = buffer.substring(0, thru);
-    var remainder = buffer.substring(thru + 1);
+Socket.prototype.handleDataBuffer = function (raw) {
     var parsed;
 
     if (0 == raw.length) {
@@ -154,8 +150,6 @@ Socket.prototype.handleDataBuffer = function (buffer) {
     }
 
     this.resetTimeoutRecv();
-
-    return this.handleDataBuffer(remainder);
 }
 
 Socket.prototype.sendError = function (error) {
