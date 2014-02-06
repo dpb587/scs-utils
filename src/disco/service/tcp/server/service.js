@@ -22,7 +22,7 @@ function Service(registry, options, logger) {
 
     this.sockets = {};
 
-    this.socketCommands = UtilCommands.mergeCommandSets(
+    this.commands = UtilCommands.mergeCommandSets(
         [
             require('../../common/server/commands'),
             require('./commands')

@@ -12,7 +12,7 @@ logger.level = cliargs.log_level;
 logger.silly('process/args', JSON.stringify(cliargs));
 
 
-var client = new (require('../disco/client/service'))(null, logger);
+var client = new (require('../src/disco/service/tcp/client/service'))(null, logger);
 client.addProvision('mysql', { host : '192.168.181.168', port : 40915 });
 client.addRequirement(
     'mysql',

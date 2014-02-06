@@ -1,7 +1,8 @@
 var net = require('net');
 var uuid = require('node-uuid');
 var Socket = require('../socket');
-var commands = require('./commands');
+var Session = require('../../../registry/session');
+var UtilCommands = require('../../common/util-commands');
 
 function Service(options, logger) {
     var options = options || {};
@@ -24,6 +25,9 @@ function Service(options, logger) {
     this.activeLocal = false;
     this.activeRemote = false;
 
+    this.session = new Session(null, {}, logger);
+    this.session.id = 'anonymous';
+
     this.socket = null;
 
     this.reconnectBackoff = 0;
@@ -32,27 +36,10 @@ function Service(options, logger) {
     this.provisionHandles = {};
     this.requirementHandles = {};
 
-    this.deferredCommands = [];
-}
-
-Service.prototype.deferCommand = function (cmd, args, callback) {
-    if (this.socket && 'anonymous' != this.session.id) {
-        this.session.sendCommand(cmd, args, callback);
-    } else {
-        this.deferredCommands.push([ cmd, args, callback ]);
-    }
-}
-
-Service.prototype.flushDeferredCommands = function () {
-    var that = this;
-
-    var deferred = this.deferredCommands;
-    this.deferredCommands = [];
-
-    deferred.forEach(
-        function (args) {
-            that.deferCommand(args[0], args[1], args[2]);
-        }
+    this.commands = UtilCommands.mergeCommandSets(
+        [
+            require('./commands')
+        ]
     );
 }
 
@@ -71,7 +58,7 @@ Service.prototype.addProvision = function (endpoint, address, options) {
         activeRemote : false
     };
 
-    this.deferCommand(
+    this.session.sendCommand(
         'provision.add',
         {
             environment : options.environment,
@@ -118,7 +105,7 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
         activeRemote : false
     };
 
-    this.deferCommand(
+    this.session.sendCommand(
         'requirement.add',
         {
             environment : options.environment,
@@ -149,7 +136,6 @@ Service.prototype.reconnect = function () {
         this.socket.end();
     }
 
-    this.session.unbindSocket();
     this.socket = null;
 
     this.socket = new Socket(
@@ -158,11 +144,10 @@ Service.prototype.reconnect = function () {
             host : this.options.server.host,
             port : this.options.server.port
         }),
+        this,
         null,
         this.logger
     );
-
-    this.socket.bindSession(this.session);
 
     this.socket.raw.on('connect', function () {
         that.logger.verbose('client', 'connected');
@@ -170,7 +155,7 @@ Service.prototype.reconnect = function () {
         that.reconnectBackoff = 0;
 
         if ('anonymous' != that.session.id) {
-            that.session.sendCommand(
+            that.socket.sendSocketCommand(
                 'session.attach',
                 { 'id' : that.session.id },
                 function (error, result) {
@@ -180,33 +165,44 @@ Service.prototype.reconnect = function () {
                         return;
                     }
 
+                    that.socket.setSession(that.session);
+
                     that.logger.verbose('client', 'rejoined existing session');
 
-                    that.flushDeferredCommands();
+                    that.activeRemote = true;
                 }
             );
         } else {
-            that.session.sendCommand(
-                'session.join',
+            that.socket.sendSocketCommand(
+                'registry.join',
                 {},
                 function (error, result) {
                     if (error) {
-                        that.logger.error('client/session.join', error);
+                        that.logger.error('client/registry.join', error);
 
                         return;
                     }
 
                     that.session.id = result.id;
+                    that.session.attach(that.socket);
+                    that.socket.setSession(that.session);
 
                     that.logger.verbose('client', 'joined new session (' + that.session.id + ')');
 
-                    that.flushDeferredCommands();
+                    that.activeRemote = true;
                 }
             );
         }
     });
     this.socket.raw.on('error', function (error) {
-        that.logger.error('client', error.message);
+        that.logger.error(
+            'client/error',
+            error.name + ':' + error.message
+        );
+        that.logger.info(
+            'client/error',
+            error.stack
+        );
     });
     this.socket.raw.on('close', function (had_error) {
         if (that.activeLocal) {
@@ -232,16 +228,34 @@ Service.prototype.start = function (callback) {
 };
 
 Service.prototype.stop = function (callback) {
-    if (callback) this.server.on('close', callback);
+    var that = this;
 
-    this.activeLocal = false;
+    if (callback) {
+        this.server.on('close', callback);
+    }
 
-    clearTimeout(this.reconnectTimer);
-    this.reconnectBackoff = 0;
+    if (true == this.activeLocal) {
+        this.activeLocal = false;
 
-    this.logger.silly('client', 'disconnecting...');
+        clearTimeout(this.reconnectTimer);
+        this.reconnectBackoff = 0;
 
-    this.socket.end();
+        this.logger.silly('client', 'disconnecting...');
+
+        if (true == this.activeRemote) {
+            this.session.sendCommand(
+                'registry.leave',
+                null,
+                function () {
+                    that.socket.end();
+                }
+            );
+        } else {
+            this.socket.end();
+        }
+    } else {
+        this.socket.end();
+    }
 }
 
 module.exports = Service;

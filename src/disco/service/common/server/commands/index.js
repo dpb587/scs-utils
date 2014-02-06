@@ -1,5 +1,5 @@
 module.exports = {
-    ephemeral : {
+    socket : {
         'ping' : require('./ping')
     },
     session : {

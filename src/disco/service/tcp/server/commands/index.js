@@ -1,5 +1,5 @@
 module.exports = {
-    ephemeral : {
+    socket : {
         'registry.join' : require('./registry-join'),
         'session.attach' : require('./session-attach')
     },

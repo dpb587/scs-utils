@@ -1,1 +1,5 @@
-module.exports = {};
+module.exports = {
+    session : {
+        'requirement.changed' : require('./requirement-changed')
+    }
+};

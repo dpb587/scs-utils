@@ -2,16 +2,16 @@ module.exports = {};
 
 module.exports.mergeCommandSets = function (sets) {
     var commands = {
-        ephemeral : {},
+        socket : {},
         session : {}
     };
 
     sets.forEach(
         function (set) {
-            if ('ephemeral' in set) {
-                Object.keys(set.ephemeral).forEach(
+            if ('socket' in set) {
+                Object.keys(set.socket).forEach(
                     function (key) {
-                        commands.ephemeral[key] = set.ephemeral[key];
+                        commands.socket[key] = set.socket[key];
                     }
                 );
             }

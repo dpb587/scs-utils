@@ -9,7 +9,13 @@ module.exports = {
         }
     },
     handle : function (context, session, args, respond) {
-        context.getSession(args.id).attach(this);
+        try {
+            context.getSession(args.id).attach(this);
+        } catch (error) {
+            respond(error);
+
+            return;
+        }
 
         respond(
             null,

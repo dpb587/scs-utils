@@ -16,15 +16,15 @@ logger.level = cliargs.log_level;
 
 logger.silly('process/args', JSON.stringify(cliargs));
 
-var RegistryService = require('../disco/registry/service');
-var ServerService = require('../disco/server/service');
-var HttpService = require('../disco/http/service');
+var RegistryService = require('../src/disco/registry/service');
+var TcpService = require('../src/disco/service/tcp/server/service');
+var HttpService = require('../src/disco/http/service');
 
 var context = {};
 
 context.registry = new RegistryService(null, logger);
 
-context.server = new ServerService(context.registry, null, logger);
+context.server = new TcpService(context.registry, null, logger);
 context.server.start();
 
 context.http = new HttpService(context, null, logger);

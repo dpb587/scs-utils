@@ -7,7 +7,7 @@ function Socket(service, raw, context, options, logger) {
 
     options = options || {};
     options.heartbeatRecv = 'heartbeatRecv' in options ? options.heartbeatRecv : 70000;
-    options.heartbeatSend = 'heartbeatSend' in options ? options.heartbeatSend : 20000;
+    options.heartbeatSend = 'heartbeatSend' in options ? options.heartbeatSend : 22000;
     this.options = options;
 
     this.id = uuid.v4();
@@ -29,7 +29,7 @@ function Socket(service, raw, context, options, logger) {
     this.logger = logger;
     this.loggerTopic = 'server/tcp/socket#' + this.id;
 
-    this.commands = service.socketCommands;
+    this.commands = service.commands;
     this.localCommandCallbacks = {};
 
     this.raw.setEncoding('utf8');
@@ -47,6 +47,16 @@ function Socket(service, raw, context, options, logger) {
         clearInterval(that.heartbeatSendHandle);
         clearTimeout(that.heartbeatRecvHandle);
     });
+    this.raw.on('error', function (error) {
+        that.logger.error(
+            that.loggerTopic + '/error',
+            error.name + ': ' + error.message
+        );
+        that.logger.info(
+            that.loggerTopic + '/error',
+            error.stack
+        );
+    })
     this.raw.on('data', function (data) {
         var data = data.replace(/\r\n/g, '\n');
 
@@ -175,6 +185,7 @@ Socket.prototype.sendCommand = function (reqid, command, data) {
 
 Socket.prototype.cleanupCommandArgs = function (cmdrun, args) {
     var cmdargs = cmdrun.args || {};
+    var args = args || {};
 
     for (var arg in cmdargs) {
         if (!(arg in args)) {
@@ -185,7 +196,7 @@ Socket.prototype.cleanupCommandArgs = function (cmdrun, args) {
             }
         }
 
-        if (('type' in cmdargs[arg]) && (null !== args[arg]) && (cmdargs[arg].type != typeof args[arg])) {
+        if (('type' in cmdargs[arg]) && (cmdargs[arg].required && (cmdargs[arg].type != typeof args[arg]))) {
             throw new SyntaxError('Argument "' + arg + '" should be of type ' + cmdargs[arg].type + ' (' + typeof args[arg] + ' provided)');
         }
     }
@@ -205,7 +216,7 @@ Socket.prototype.cleanupCommandArgs = function (cmdrun, args) {
 
 Socket.prototype.recvCommand = function (msgid, command, args) {
     var that = this;
-    var commands = this.commands[this.hasSession() ? 'session' : 'ephemeral'];
+    var commands = this.commands[this.hasSession() ? 'session' : 'socket'];
 
     if (!(command in commands)) {
         throw new Error('The command "' + command + '" is not available.');
@@ -248,14 +259,27 @@ Socket.prototype.recvCommand = function (msgid, command, args) {
     }
 }
 
+Socket.prototype.sendSocketCommand = function (command, args, callback) {
+    var msgid = uuid.v4();
+
+    this.localCommandCallbacks[msgid] = callback;
+
+    this.sendCommand(msgid, command, args);
+}
+
 Socket.prototype.recvResult = function (msgid, result) {
     if (msgid in this.localCommandCallbacks) {
-        this.localCommandCallbacks[msgid](data);
+        var callback = this.localCommandCallbacks[msgid];
         delete this.localCommandCallbacks[msgid];
+
+        callback(
+            ('error' in result) ? result.error : null,
+            ('result' in result) ? result.result : null
+        );
     } else if (this.hasSession()) {
         this.session.recvResult(msgid, result);
     } else {
-        throw new Error('Received a result for an unknown request.');
+        throw new Error('Received a result for an unknown local request.');
     }
 }
 

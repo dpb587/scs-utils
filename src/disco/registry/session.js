@@ -28,6 +28,10 @@ Session.prototype.attach = function (socket) {
         this.loggerTopic + '/socket',
         'bound to ' + socket.id
     );
+
+    process.nextTick(
+        this.flushQueue.bind(this)
+    );
 };
 
 Session.prototype.detach = function () {
@@ -55,6 +59,18 @@ Session.prototype.pushSocket = function (method, args) {
         );
     }
 };
+
+Session.prototype.flushQueue = function () {
+    var that = this;
+    var queue = this.socketQueue.slice(0, this.socketQueue.length);
+    this.socketQueue = [];
+
+    queue.forEach(
+        function (call) {
+            that.socket[call[0]].apply(that.socket, call[1]);
+        }
+    );
+}
 
 Session.prototype.sendCommand = function (command, data, callback) {
     var msgid = uuid.v4();
