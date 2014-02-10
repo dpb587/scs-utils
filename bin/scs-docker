@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+
+var fs = require('fs');
+var os = require('os');
+var path = require('path');
+var util = require('util');
+
+var CompiledConfig = require('../src/config/compiled');
+var CoreConfig = require('../src/config/core');
+var RuntimeConfig = require('../src/config/runtime');
+var Profile = require('../src/runtime/profile');
+
+// --
+
+var cli = new (require('argparse').ArgumentParser)({ description : 'Create a dynamic forwarding agent for etcd-based service discovery.' });
+
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+
+cli.addArgument([ '--config' ], { help : 'specify a config value', defaultValue : [], metavar : 'KEY=VALUE', action : 'append' });
+cli.addArgument([ '--config-file' ], { help : 'a core configuration file (json, yaml)', defaultValue : [], metavar : 'PATH', action : 'append' });
+
+cli.addArgument([ '--compiled-file' ], { help : 'file to cache compiled and loaded configuration', defaultValue : 'compiled.json', metavar : 'PATH' });
+
+cli.addArgument([ 'command' ], { help : 'command to run' });
+cli.addArgument([ 'runconf' ], { help : 'file containing the runtime configuration', defaultValue : [ 'runtime.json' ], nargs : '*' });
+
+var cliargs = cli.parseArgs();
+
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
+
+// --
+
+process.on('exit', function () {
+    if (compconf) {
+        fs.writeFileSync(cliargs.compiled_file, JSON.stringify(compconf.config, null, 2));
+    }
+});
+
+process.on('uncaughtException', function (error) {
+    logger.error('process/error', error.toString());
+    logger.info('process/error', error.stack);
+
+    process.exit(1);
+});
+
+// --
+
+logger.silly('process/args', JSON.stringify(cliargs));
+
+function abspath(p) {
+    return path.resolve(process.cwd(), p);
+}
+
+cliargs.config_file = cliargs.config_file.map(abspath);
+cliargs.runconf = cliargs.runconf.map(abspath);
+cliargs.compiled_file = abspath(cliargs.compiled_file);
+
+logger.verbose('process/args', JSON.stringify(cliargs));
+
+// --
+
+var coreconf = new CoreConfig();
+coreconf.importFiles(cliargs.config_file);
+coreconf.importArrayPairs(cliargs.config);
+coreconf.log(logger, 'silly', 'process/coreconf');
+
+// --
+
+var runconf = new RuntimeConfig();
+runconf.importFiles(cliargs.runconf);
+runconf.log(logger, 'silly', 'process/runconf');
+
+// --
+
+var compconf = new CompiledConfig();
+compconf.importFile(cliargs.compiled_file);
+compconf.log(logger, 'silly', 'process/compconf');
+
+// --
+
+var profile = new Profile(
+    coreconf,
+    runconf,
+    compconf,
+    logger
+);
+
+if (true || !compconf.has('imageconf')) {
+    // we need to gather information
+    profile.createGatheringWorkflow().run(
+        function (error, result) {
+            if (error) {
+                throw error;
+            }
+
+            profile.createImageBuildingWorkflow().run(
+                function (error, result) {
+                    if (error) {
+                        throw error;
+                    }
+
+                    console.log('done');
+                }
+            );
+        }
+    )
+} else {
+    // ready to go!
+}
