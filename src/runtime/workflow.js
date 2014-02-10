@@ -48,10 +48,14 @@ Workflow.prototype.nextStep = function (error, result) {
         this.currStep[0]
     );
 
-    this.currStep[1](
-        this,
-        this.nextStep
-    );
+    try {
+        this.currStep[1](
+            this,
+            this.nextStep
+        );
+    } catch (e1) {
+        this.nextStep(e1);
+    }
 }
 
 Workflow.prototype.run = function (callback) {

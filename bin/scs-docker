@@ -74,7 +74,11 @@ runconf.log(logger, 'silly', 'process/runconf');
 // --
 
 var compconf = new CompiledConfig();
-compconf.importFile(cliargs.compiled_file);
+
+if (fs.existsSync(cliargs.compiled_file)) {
+    compconf.importFile(cliargs.compiled_file);
+}
+
 compconf.log(logger, 'silly', 'process/compconf');
 
 // --
@@ -86,25 +90,20 @@ var profile = new Profile(
     logger
 );
 
-if (true || !compconf.has('imageconf')) {
-    // we need to gather information
-    profile.createGatheringWorkflow().run(
-        function (error, result) {
-            if (error) {
-                throw error;
-            }
-
-            profile.createImageBuildingWorkflow().run(
-                function (error, result) {
-                    if (error) {
-                        throw error;
-                    }
-
-                    console.log('done');
-                }
-            );
+profile.createGatheringWorkflow().run(
+    function (error, result) {
+        if (error) {
+            throw error;
         }
-    )
-} else {
-    // ready to go!
-}
+
+        profile.createImageBuildingWorkflow().run(
+            function (error, result) {
+                if (error) {
+                    throw error;
+                }
+
+                console.log('done');
+            }
+        );
+    }
+)

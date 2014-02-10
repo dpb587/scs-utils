@@ -26,20 +26,6 @@ function setContext(context, name, value, overwrite, fullpath) {
     if (1 == split.length) {
         if (null === value) {
             delete context[name];
-        } else if ('array' == typeof value) {
-            if (!(name in context)) {
-                context[name] = [];
-            }
-
-            if ('array' != typeof context[name]) {
-                throw new Error('Unable to set array value on a non-array (' + fullpath + ')');
-            }
-
-            value.forEach(
-                function (ivalue, iname) {
-                    setContext(context[split[0]], iname, ivalue, overwrite, fullpath + '.' + iname);
-                }
-            );
         } else if ('object' == typeof value) {
             if (!(name in context)) {
                 context[name] = {};
@@ -62,9 +48,7 @@ function setContext(context, name, value, overwrite, fullpath) {
     }
 
     if (!(split[0] in context)) {
-        if (('array' == typeof value) || ((1 < split.length) && /^\d+$/.exec(split[1]))) {
-            context[split[0]] = [];
-        } else if (('object' == value) || (1 < split.length)) {
+        if (('object' == value) || (1 < split.length)) {
             context[split[0]] = {};
         }
     }
@@ -199,13 +183,7 @@ Config.prototype.importFiles = function (files) {
 }
 
 function flatten(context, callback, fullpath) {
-    if ('array' == typeof context) {
-        context.forEach(
-            function (value, key) {
-                flatten(value, callback, fullpath + '.' + key);
-            }
-        );
-    } else if ('object' == typeof context) {
+    if ('object' == typeof context) {
         Object.keys(context).sort().forEach(
             function (key) {
                 flatten(context[key], callback, fullpath + '.' + key);

@@ -69,9 +69,7 @@ function writeCompilationScriptStep (workflow, callback) {
     buildfile.push('/usr/bin/apt-get update')
     buildfile.push('/usr/bin/apt-get -y install puppet')
     buildfile.push('/usr/bin/puppet module install puppetlabs/stdlib')
-
-    buildfile.push('/usr/bin/puppet apply --modulepath=/scs/scs/puppet:/etc/puppet/modules:/usr/share/puppet/modules /scs/scs/image.pp')
-
+    buildfile.push('/usr/bin/puppet apply --debug --modulepath=/scs/scs/puppet:/etc/puppet/modules:/usr/share/puppet/modules /scs/scs/image.pp')
     buildfile.push('/usr/bin/apt-get -y remove --purge puppet')
     buildfile.push('/usr/bin/apt-get -y autoremove --purge')
     buildfile.push('/usr/bin/apt-get clean && /bin/rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*')

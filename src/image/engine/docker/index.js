@@ -81,7 +81,27 @@ function writeDockerfileStep (workflow, callback) {
         }
     );
 
-    dockerfile.push('EXPOSE 9001')
+    dockerfile.push('EXPOSE 9001');
+
+
+    var patchpre = this.config.get('build_patch.pre', {});
+
+    Object.keys(patchpre).forEach(
+        function (i) {
+            dockerfile.push('RUN ' + patchpre[i]);
+        }
+    );
+
+    dockerfile.push('RUN /scs/scs/compile');
+
+
+    var patchpost = this.config.get('build_patch.post', {});
+
+    Object.keys(patchpost).forEach(
+        function (i) {
+            dockerfile.push('RUN ' + patchpost[i]);
+        }
+    );
 
     var path = this.profile.compconf.get('ident.tmppath') + '/Dockerfile';
 
@@ -96,6 +116,57 @@ Engine.prototype.appendCompilationSteps = function (workflow) {
         'writing Dockerfile',
         writeDockerfileStep.bind(this)
     );
+}
+
+function buildBuildBase (workflow, callback) {
+    var build = child_process.spawn(
+        'docker',
+        [ 'build', '-rm', '-t', this.profile.compconf.get('ident.image'), '.' ],
+        {
+            cwd : this.profile.compconf.get('ident.tmppath'),
+            stdio : 'inherit'
+        }
+    );
+
+    build.on('close', function (code) {
+        if (0 < code) {
+            throw new Error('docker build failed');
+
+            return;
+        }
+
+        callback(null, true);
+    })
+}
+
+function buildRemoveOldImages (workflow, callback) {
+    var name = this.profile.compconf.get('ident.image');
+
+    child_process.exec(
+        'docker rmi ' + name + '-base ' + name,
+        function (error, stdout, stderr) {
+            child_process.exec(
+                'docker rm ' + name + '-provisioned',
+                function (error, stdout, stderr) {
+                    callback(null, true);
+                }
+            );
+        }
+    );
+}
+
+Engine.prototype.build = function (workflow, callback) {
+    workflow.pushStep(
+        'removing old images',
+        buildRemoveOldImages.bind(this)
+    );
+
+    workflow.pushStep(
+        'build base image',
+        buildBuildBase.bind(this)
+    );
+
+    callback(null, true);
 }
 
 Engine.prototype.runRequirementLiveupdate = function (command, requirement, config) {

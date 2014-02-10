@@ -156,7 +156,7 @@ function updateIdentsStep (workflow, callback) {
     hash.update([
         'source.type=' + this.runconf.get('source.type'),
         'source.uri=' + this.runconf.get('source.uri'),
-        'source.reference=' + this.compconf.get('source.reference')
+        'source.reference_canonical=' + this.compconf.get('source.reference_canonical')
     ].join('\n'));
     hash.update('\n--\n');
     hash.update(this.runconf.getFlattenedPairs('image.config').join('\n'));
@@ -225,12 +225,23 @@ function compileImageConfigurationStep (workflow, callback) {
     callback(null, true);
 }
 
+function buildImageStep (workflow, callback) {
+    this.getImageEngine().build(workflow, callback);
+}
+
 Profile.prototype.createImageBuildingWorkflow = function () {
     var workflow = new Workflow(this, 'workflow/image-building');
 
     workflow.pushStep(
         'preparing image compilation',
         compileImageConfigurationStep.bind(this)
+    );
+
+    var engine = this.getImageEngine();
+
+    workflow.pushStep(
+        'building image',
+        engine.build.bind(engine)
     );
 
     return workflow;
