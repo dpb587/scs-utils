@@ -21,7 +21,7 @@ cli.addArgument([ '--config-file' ], { help : 'a core configuration file (json, 
 
 cli.addArgument([ '--compiled-file' ], { help : 'file to cache compiled and loaded configuration', defaultValue : 'compiled.json', metavar : 'PATH' });
 
-cli.addArgument([ 'command' ], { help : 'command to run' });
+cli.addArgument([ 'command' ], { help : 'command to run', choices : [ 'cache-put', 'cache-get', 'build', 'run', 'run-load', 'run-unload' ] });
 cli.addArgument([ 'runconf' ], { help : 'file containing the runtime configuration', defaultValue : [ 'runtime.json' ], nargs : '*' });
 
 var cliargs = cli.parseArgs();
@@ -90,6 +90,7 @@ var profile = new Profile(
     logger
 );
 
+/*
 profile.createGatheringWorkflow().run(
     function (error, result) {
         if (error) {
@@ -107,3 +108,15 @@ profile.createGatheringWorkflow().run(
         );
     }
 )
+//*/
+///*
+profile.startContainer(
+    function (error, container) {
+        if (error) {
+            throw error;
+        }
+
+        console.log('started');
+    }
+);
+//*/

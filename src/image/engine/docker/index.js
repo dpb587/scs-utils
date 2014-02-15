@@ -169,6 +169,36 @@ Engine.prototype.build = function (workflow, callback) {
     callback(null, true);
 }
 
+Engine.prototype.run = function (container, callback) {
+    var cmd = [];
+
+    cmd.push('run');
+
+    var provide = this.profile.compconf.get('imageconf.runtime.provide', {});
+
+    Object.keys(provide).forEach(
+        function (key) {
+            cmd.push('-p', provide[key].port + '/' + (('protocol' in provide[key]) ? provide[key].protocol : 'tcp'));
+        }
+    );
+
+    container.setEnv('SCS_ENVIRONMENT', this.profile.runconf.get('name.environment'));
+    container.setEnv('SCS_ROLE', this.profile.runconf.get('name.role'));
+    container.setEnv('SCS_SERVICE', this.profile.runconf.get('name.service'));
+
+    var env = container.getAllEnv();
+
+    Object.keys(env).forEach(
+        function (key) {
+            cmd.push('-e', key);
+        }
+    );
+
+    console.log(cmd);
+
+    callback();
+}
+
 Engine.prototype.runRequirementLiveupdate = function (command, requirement, config) {
 
 }
