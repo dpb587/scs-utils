@@ -154,7 +154,7 @@ Container.prototype.start = function (callback) {
     });
 
     command.pushStep('engine/start', function (workflow, callback1) {
-        this.engine.run(
+        this.engine.start(
             this,
             callback1
         );

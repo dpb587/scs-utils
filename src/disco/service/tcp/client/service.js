@@ -124,7 +124,47 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
             that.requirementHandles[lid].endpoints = result.endpoints;
             that.requirementHandles[lid].handle = result.id;
             that.requirementHandles[lid].activeRemote = true;
-            that.requirementHandles[lid].callback('reset', result.endpoints, function () {});
+            that.requirementHandles[lid].callback('initial', result.endpoints, function () {});
+        }
+    );
+}
+
+Service.prototype.dropProvision = function (id, callback) {
+    var that = this;
+
+    this.provisionHandles[id].activeLocal = false;
+
+    this.session.sendCommand(
+        'provision.drop',
+        {
+            id : this.provisionHandles[id].handle
+        },
+        function (error, result) {
+            if (!error) {
+                delete that.provisionHandles[id];
+            }
+
+            callback(error, result);
+        }
+    );
+}
+
+Service.prototype.dropRequirement = function (id, callback) {
+    var that = this;
+
+    this.requirementHandles[id].activeLocal = false;
+
+    this.session.sendCommand(
+        'requirement.drop',
+        {
+            id : this.requirementHandles[id].handle
+        },
+        function (error, result) {
+            if (!error) {
+                delete that.requirementHandles[id];
+            }
+
+            callback(error, result);
         }
     );
 }

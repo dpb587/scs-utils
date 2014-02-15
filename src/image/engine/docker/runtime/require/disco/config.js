@@ -10,7 +10,8 @@ function Config() {
 util.inherits(Config, ConfigBase);
 
 Config.prototype.setDefaults = function () {
-    this.set('server', '127.0.0.1:9640');
+    this.set('server.address', '127.0.0.1');
+    this.set('server.port', '9640');
 }
 
 // --

@@ -169,16 +169,24 @@ Engine.prototype.build = function (workflow, callback) {
     callback(null, true);
 }
 
-Engine.prototype.run = function (container, callback) {
-    var cmd = [];
+Engine.prototype.start = function (container, callback) {
+    var args = [];
 
-    cmd.push('run');
+    args.push('run');
 
     var provide = this.profile.compconf.get('imageconf.runtime.provide', {});
 
     Object.keys(provide).forEach(
         function (key) {
-            cmd.push('-p', provide[key].port + '/' + (('protocol' in provide[key]) ? provide[key].protocol : 'tcp'));
+            args.push('-p', provide[key].port + '/' + (('protocol' in provide[key]) ? provide[key].protocol : 'tcp'));
+        }
+    );
+
+    var volume = container.volume;
+
+    Object.keys(volume).forEach(
+        function (key) {
+            args.push('-v', volume[key] + ':/scs-mnt/' + key);
         }
     );
 
@@ -186,17 +194,48 @@ Engine.prototype.run = function (container, callback) {
     container.setEnv('SCS_ROLE', this.profile.runconf.get('name.role'));
     container.setEnv('SCS_SERVICE', this.profile.runconf.get('name.service'));
 
-    var env = container.getAllEnv();
+    var env = process.env;
+    var nenv = container.getAllEnv();
 
-    Object.keys(env).forEach(
+    Object.keys(nenv).forEach(
         function (key) {
-            cmd.push('-e', key);
+            args.push('-e', key);
+            env[key] = nenv[key];
         }
     );
 
-    console.log(cmd);
+    args.push(this.profile.compconf.get('ident.image'));
 
-    callback();
+    container.logger.verbose('container/run/env', JSON.stringify(env));
+    container.logger.verbose('container/run/exec', 'docker ' + args.join(' '));
+
+    var handle = child_process.spawn(
+        'docker',
+        args,
+        {
+            env : env
+        }
+    );
+
+    handle.stdout.on('data', function (data) {
+        container.logger.verbose('container/run/stdout', data.toString('utf8'));
+    });
+
+    handle.stderr.on('data', function (data) {
+        container.logger.verbose('container/run/stderr', data.toString('utf8'));
+    });
+
+    handle.on('close', function (code) {
+        container.logger.verbose('container/run/exit', code);
+        container.stop(function () {console.log('died'); });
+    });
+
+    container.handle = handle;
+
+    setTimeout(
+        callback,
+        2500
+    );
 }
 
 Engine.prototype.runRequirementLiveupdate = function (command, requirement, config) {

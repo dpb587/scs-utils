@@ -9,10 +9,12 @@ function Provision(profile, id, config, logger) {
     this.config = config;
     this.logger = logger;
 
-    this.config.set('environment', this.profile.runconf.get('name.environment'), false);
-    this.config.set('service', this.profile.runconf.get('name.service'), false);
-    this.config.set('role', this.profile.runconf.get('name.role'), false);
-    this.config.set('endpoint', this.id, false);
+    this.discoId = null;
+
+    this.config.set('name.environment', this.profile.runconf.get('name.environment'), false);
+    this.config.set('name.service', this.profile.runconf.get('name.service'), false);
+    this.config.set('name.role', this.profile.runconf.get('name.role'), false);
+    this.config.set('name.endpoint', this.id, false);
     this.config.set('attributes', {}, false);
 
     this.config.log(this.logger, 'silly', 'container/provide/' + this.id + '/config');
@@ -22,7 +24,7 @@ Provision.prototype.getDiscoClient = function (container) {
     var that = this;
 
     return container.retrieve(
-        'disco_' + this.config.get('server.host') + '_' + this.config.get('server.port'),
+        'disco_' + this.config.get('server.address') + '_' + this.config.get('server.port'),
         function () {
             var disco = new DiscoTcpClient(
                 {
@@ -47,19 +49,18 @@ Provision.prototype.onContainerUp = function (steps, callback, container) {
 }
 
 Provision.prototype.onContainerStarted = function (steps, callback, container) {
-    // @todo register
     var disco = this.getDiscoClient(container);
 
-    disco.addProvision(
+    this.discoId = disco.addProvision(
         this.id,
         {
             address : container.getNetworkPublicAddress(),
             port : 1234
         },
         {
-            environment : this.config.get('environment'),
-            service : this.config.get('service'),
-            role : this.config.get('role'),
+            environment : this.config.get('name.environment'),
+            service : this.config.get('name.service'),
+            role : this.config.get('name.role'),
             attributes : this.config.get('attributes')
         }
     );
