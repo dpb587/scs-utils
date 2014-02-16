@@ -6,7 +6,12 @@ locale-gen en_US.UTF-8
 
 
 # apt-cacher
+echo "apt-cacher apt-cacher/mode select daemon" | debconf-set-selections
 apt-get -y install apt-cacher
+sed -i "s/#allowed_hosts = \*/allowed_hosts = */" /etc/apt-cacher/apt-cacher.conf
+sed -i "s/#allowed_ssl_locations =.*/allowed_ssl_locations = get.docker.io/" /etc/apt-cacher/apt-cacher.conf
+service apt-cacher restart
+echo 'Acquire::http::Proxy "http://127.0.0.1:3142";' > /etc/apt/apt.conf.d/01proxy
 
 
 # core tools
@@ -29,9 +34,7 @@ else
 fi
 
 pushd /usr/local/scs-utils
-pip install --upgrade -r requirements.txt
 npm install
-( cd node_modules/node-etcd/ && npm install && npm run-script build )
 ln -s $PWD/bin/* /usr/bin/
 popd
 
