@@ -22,7 +22,9 @@ Provision.prototype.onContainerLoad = function (steps, callback, container) {
     container.env.setExposedPort(
         this.id,
         this.cimage.get('protocol'),
-        this.cimage.get('port')
+        this.cimage.get('port'),
+        this.ccontainer.get('publish.port', null),
+        this.ccontainer.get('publish.address', null)
     );
 
     callback();

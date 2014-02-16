@@ -17,6 +17,9 @@ module.exports.compileContainerConfig = function (names, id, configs) {
 
     ccontainer.set('attributes', {});
 
+    ccontainer.set('publish.port', null);
+    ccontainer.set('publish.address', null);
+
     configs.forEach(function (config) {
         ccontainer.importObject(config);
     });

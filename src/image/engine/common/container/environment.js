@@ -12,12 +12,12 @@ Environment.prototype.getAllExposedPorts = function () {
     return this.exposedPorts;
 }
 
-Environment.prototype.setExposedPort = function (name, protocol, port, publishHost, publishPort) {
+Environment.prototype.setExposedPort = function (name, protocol, port, publishPort, publishAddress) {
     this.exposedPorts[name] = {
         protocol : protocol,
         port : port,
-        publishHost : publishHost,
-        publishPort : publishPort
+        publishPort : publishPort,
+        publishAddress : publishAddress
     };
 
     return this;

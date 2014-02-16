@@ -46,7 +46,7 @@ Container.prototype.engineStart = function (callback) {
 
     Object.keys(exposedPortMap).forEach(
         function (key) {
-            args.push('-p', exposedPortMap[key].port + '/' + exposedPortMap[key].protocol);
+            args.push('-p', (exposedPortMap[key].publishAddress ? exposedPortMap[key].publishAddress : '') + ':' + (exposedPortMap[key].publishPort ? exposedPortMap[key].publishPort : '') + ':' + exposedPortMap[key].port + '/' + exposedPortMap[key].protocol);
         }
     );
 
