@@ -73,8 +73,15 @@ Container.prototype.engineStart = function (callback) {
     args.push('-cidfile', '/tmp/scs-' + this.id + '.cid');
     args.push('scs-' + this.cimage.get('id.uid'));
 
-    this.logger.verbose('container/run/env', JSON.stringify(env));
-    this.logger.verbose('container/run/exec', 'docker ' + args.join(' '));
+    this.logger.verbose(
+        'container/run/env',
+        JSON.stringify(env)
+    );
+
+    this.logger.verbose(
+        'container/run/exec',
+        'docker ' + args.join(' ')
+    );
 
     var dockerProcess = child_process.spawn(
         'docker',
@@ -88,14 +95,20 @@ Container.prototype.engineStart = function (callback) {
     dockerProcess.stdout.on(
         'data',
         function (data) {
-            that.logger.verbose('container/run/stdout', data.toString('utf8'));
+            that.logger.verbose(
+                'container/run/stdout',
+                data.toString('utf8')
+            );
         }
     );
 
     dockerProcess.stderr.on(
         'data',
         function (data) {
-            that.logger.verbose('container/run/stderr', data.toString('utf8'));
+            that.logger.error(
+                'container/run/stderr',
+                data.toString('utf8')
+            );
         }
     );
 
@@ -104,7 +117,10 @@ Container.prototype.engineStart = function (callback) {
         function (code) {
             that.dockerProcessActive = false;
 
-            that.logger.verbose('container/run/exit', code);
+            that.logger.verbose(
+                'container/run/exit',
+                code
+            );
         }
     );
 

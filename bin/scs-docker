@@ -124,6 +124,13 @@ switch (cliargs.command) {
         break;
     case 'run':
         workflow.pushStep(
+            'compile',
+            function (workflow, callback) {
+                profile.compile(callback);
+            }
+        );
+
+        workflow.pushStep(
             'build',
             function (workflow, callback) {
                 profile.build(callback);

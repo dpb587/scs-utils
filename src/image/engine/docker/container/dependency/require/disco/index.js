@@ -83,9 +83,95 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
                 );
             }
 
-            console.log('@todo live update w/ ' + simplifyEndpoints(that.discoState));
+            if (true === that.cimage.get('liveupdate.enabled')) {
+                var env = {};
+                env['SCS_REQUIRE_' + that.id.toUpperCase()] = simplifyEndpoints(that.discoState);
 
-            callback1();
+                var cmd = that.cimage.get('liveupdate.command');
+
+                that.logger.verbose(
+                    'container/dependency/require/' + that.id + '/liveupdate',
+                    'running...'
+                );
+
+                that.logger.silly(
+                    'container/dependency/require/' + that.id + '/liveupdate/env',
+                    JSON.stringify(env)
+                );
+
+                that.logger.silly(
+                    'container/dependency/require/' + that.id + '/liveupdate/exec',
+                    cmd
+                );
+
+                var liveupdate = child_process.spawn(
+                    'lxc-attach',
+                    [
+                        '-n',
+                        container.dockerContainerId,
+                        '--keep-env',
+                        cmd
+                    ],
+                    {
+                        env : env,
+                        timeout : that.cimage.get('liveupdate.timeout')
+                    }
+                );
+                
+                liveupdate.stdout.on(
+                    'data',
+                    function (data) {
+                        that.logger.silly(
+                            'container/dependency/require/' + that.id + '/liveupdate/stdout',
+                            data.toString('utf8')
+                        );
+                    }
+                );
+
+                liveupdate.stderr.on(
+                    'data',
+                    function (data) {
+                        that.logger.error(
+                            'container/dependency/require/' + that.id + '/liveupdate/stderr',
+                            data.toString('utf8')
+                        );
+                    }
+                );
+
+                liveupdate.on(
+                    'close',
+                    function (code) {
+                        that.logger.silly(
+                            'container/dependency/require/' + that.id + '/liveupdate/exit',
+                            code
+                        );
+
+                        if (0 < code) {
+                            that.logger.error(
+                                'container/dependency/require/' + that.id + '/liveupdate',
+                                'failed (exited ' + code + ')'
+                            );
+
+                            process.kill(process.pid, 'SIGTERM');
+
+                            return;
+                        }
+
+                        that.logger.info(
+                            'container/dependency/require/' + that.id + '/liveupdate',
+                            'success'
+                        );
+
+                        callback1();
+                    }
+                );
+            } else {
+                callback1();
+
+                that.logger.warn('container/dependency/require/' + that.id + '/liveupdate', 'unsupported');
+
+                process.kill(process.pid, 'SIGTERM');
+            }
         }
     );
 }
