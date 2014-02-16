@@ -25,13 +25,13 @@ function writePuppetConfigurationStep (workflow, callback) {
     Object.keys(config).forEach(
         function (part) {
             if ('main' == part) {
-                puppetfile.push('ensure_resource("class", "scs", parseyaml("' + yaml.safeDump(config[part]) + '"))');
+                puppetfile.push('ensure_resource("class", "scs", parseyaml("' + yaml.safeDump(config[part]).replace(/"/g, '\\"') + '"))');
             } else if ('puppet' == part) {
                 Object.keys(config[part]).forEach(
                     function (ptype) {
                         Object.keys(config[part][ptype]).forEach(
                             function (pname) {
-                                puppetfile.push('ensure_resource("' + ptype + '", "' + pname + '", parseyaml("' + yaml.safeDump(config[part][ptype][pname]) + '"))');
+                                puppetfile.push('ensure_resource("' + ptype + '", "' + pname + '", parseyaml("' + yaml.safeDump(config[part][ptype][pname]).replace(/"/g, '\\"') + '"))');
                             }
                         );
                     }
@@ -39,7 +39,7 @@ function writePuppetConfigurationStep (workflow, callback) {
             } else {
                 Object.keys(config[part]).forEach(
                     function (name) {
-                        puppetfile.push('ensure_resource("scs::' + name + '", "' + name + '", parseyaml("' + yaml.safeDump(config[part][name]) + '"))');
+                        puppetfile.push('ensure_resource("scs::' + name + '", "' + name + '", parseyaml("' + yaml.safeDump(config[part][name]).replace(/"/g, '\\"') + '"))');
                     }
                 );
             }
@@ -49,7 +49,7 @@ function writePuppetConfigurationStep (workflow, callback) {
     var path = this.profile.compconf.get('ident.tmppath') + '/scs/image.pp';
 
     fs.writeFileSync(path, puppetfile.join('\n'));
-    fs.chmodSync(path, 0400);
+    fs.chmodSync(path, 0600);
 
     callback(null, true);
 }
@@ -77,7 +77,7 @@ function writeCompilationScriptStep (workflow, callback) {
     var path = this.profile.compconf.get('ident.tmppath') + '/scs/compile';
 
     fs.writeFileSync(path, buildfile.join('\n'));
-    fs.chmodSync(path, 0500);
+    fs.chmodSync(path, 0700);
 
     callback(null, true);
 }

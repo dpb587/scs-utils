@@ -67,7 +67,7 @@ Source.prototype.resolveReference = function (callback) {
     );
 }
 
-function checkoutWorkingDirectoryStep (steps, callback) {
+function checkoutWorkingDirectoryStep (workflow, callback) {
     var that = this;
     var cmd = 'git checkout -q "' + this.profile.compconf.get('source.reference_canonical') + '"';
 
@@ -105,7 +105,7 @@ function checkoutWorkingDirectoryStep (steps, callback) {
     );
 }
 
-function cloneWorkingDirectoryStep (steps, callback) {
+function cloneWorkingDirectoryStep (workflow, callback) {
     var that = this;
     var cmd = 'git clone "' + this.getAbsoluteUri() + '" "' + this.profile.compconf.get('ident.tmppath') + '"';
 
@@ -140,7 +140,7 @@ function cloneWorkingDirectoryStep (steps, callback) {
     );
 }
 
-function fetchWorkingDirectoryStep (steps, callback) {
+function fetchWorkingDirectoryStep (workflow, callback) {
     var that = this;
     var cmd = 'git fetch';
 
@@ -178,21 +178,21 @@ function fetchWorkingDirectoryStep (steps, callback) {
     );
 }
 
-Source.prototype.createWorkingDirectoryStep = function (steps, callback) {
+Source.prototype.createWorkingDirectoryStep = function (workflow, callback) {
     var that = this;
 
-    steps.unshiftStep(
+    workflow.unshiftStep(
         'checking out reference',
         checkoutWorkingDirectoryStep.bind(this)
     );
 
     if (fs.existsSync(this.profile.compconf.get('ident.tmppath') + '/.git')) {
-        steps.unshiftStep(
+        workflow.unshiftStep(
             'fetching upstream repository',
             fetchWorkingDirectoryStep.bind(this)
         );
     } else {
-        steps.unshiftStep(
+        workflow.unshiftStep(
             'cloning upstream repository',
             cloneWorkingDirectoryStep.bind(this)
         );

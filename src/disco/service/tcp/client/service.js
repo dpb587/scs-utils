@@ -127,9 +127,11 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
             that.requirementHandles[lid].callback('initial', result.endpoints, function () {});
         }
     );
+
+    return lid;
 }
 
-Service.prototype.dropProvision = function (id, callback) {
+Service.prototype.dropProvision = function (id, wait, callback) {
     var that = this;
 
     this.provisionHandles[id].activeLocal = false;
@@ -137,7 +139,8 @@ Service.prototype.dropProvision = function (id, callback) {
     this.session.sendCommand(
         'provision.drop',
         {
-            id : this.provisionHandles[id].handle
+            id : this.provisionHandles[id].handle,
+            wait : wait
         },
         function (error, result) {
             if (!error) {

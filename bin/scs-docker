@@ -9,6 +9,7 @@ var CompiledConfig = require('../src/config/compiled');
 var CoreConfig = require('../src/config/core');
 var RuntimeConfig = require('../src/config/runtime');
 var Profile = require('../src/runtime/profile');
+var Workflow = require('../src/runtime/workflow');
 
 // --
 
@@ -90,33 +91,96 @@ var profile = new Profile(
     logger
 );
 
-/*
-profile.createGatheringWorkflow().run(
-    function (error, result) {
-        if (error) {
-            throw error;
-        }
+var workflow = new Workflow(null, logger, 'scs-docker');
 
-        profile.createImageBuildingWorkflow().run(
-            function (error, result) {
-                if (error) {
-                    throw error;
-                }
+if ('run' == cliargs.command) {
+    var container;
 
-                console.log('done');
+    if (!compconf.has('imageconf')) {
+        workflow.pushStep(
+            'gather-runtime',
+            function (workflow, callback) {
+                profile.createGatheringWorkflow().run(callback);
             }
         );
     }
-)
-//*/
-///*
-profile.startContainer(
-    function (error, container) {
+
+    workflow.pushStep(
+        'check-image',
+        function (workflow, callback) {
+            profile.getImageEngine().hasImage(
+                function (error, result) {
+                    if (error) {
+                        callback(error);
+
+                        return;
+                    }
+
+                    if (!result) {
+                        workflow.unshiftStep(
+                            'build-image',
+                            function (workflow, callback) {
+                                profile.createImageBuildingWorkflow().run(callback);
+                            }
+                        );
+                    }
+
+                    callback();
+                }
+            );
+        }
+    );
+
+    workflow.pushStep(
+        'run-image',
+        function (workflow, callback) {
+            profile.startContainer(
+                function (error, result) {
+                    if (error) {
+                        callback(error);
+
+                        return;
+                    }
+
+                    container = result;
+                }
+            );
+        }
+    )
+
+    function handleSignal(signal) {
+        logger.info('process/kill', signal);
+
+        if (container) {
+            container.stop(
+                function (error, result) {
+                    if (error) {
+                        throw error;
+
+                        return;
+                    }
+
+                    logger.verbose('run', 'finished');
+                }
+            );
+        }
+    }
+
+    process.on('SIGINT', function () { handleSignal('SIGINT'); });
+    process.on('SIGTERM', function () { handleSignal('SIGTERM'); });
+}
+
+workflow.run(
+    function (error, result) {
         if (error) {
-            throw error;
+            logger.error(error.toString());
+            logger.info(error.stack);
+
+            process.exit(1);
+
+            return;
         }
 
-        console.log('started');
+        logger.silly('root workflow complete');
     }
 );
-//*/

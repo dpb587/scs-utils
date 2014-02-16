@@ -1,5 +1,7 @@
-var child_process = require('child_process');
 var fs = require('fs');
+var child_process = require('child_process');
+
+var uuid = require('node-uuid');
 
 // --
 
@@ -54,7 +56,6 @@ function writeDockerfileStep (workflow, callback) {
     dockerfile = []
 
     dockerfile.push('FROM ' + this.profile.compconf.get('imageconf.engine.docker.from'));
-
     dockerfile.push('ENV SCS_ENVIRONMENT ' + this.profile.runconf.get('name.environment'));
     dockerfile.push('ENV SCS_SERVICE ' + this.profile.runconf.get('name.service'));
     dockerfile.push('ENV SCS_ROLE ' + this.profile.runconf.get('name.role'));
@@ -82,7 +83,7 @@ function writeDockerfileStep (workflow, callback) {
     );
 
     dockerfile.push('EXPOSE 9001');
-
+    dockerfile.push('WORKDIR /scs');
 
     var patchpre = this.config.get('build_patch.pre', {});
 
@@ -92,8 +93,8 @@ function writeDockerfileStep (workflow, callback) {
         }
     );
 
-    dockerfile.push('RUN /scs/scs/compile');
-
+    dockerfile.push('RUN ./scs/compile');
+    dockerfile.push('ENTRYPOINT [ "./scs/bin/run" ]');
 
     var patchpost = this.config.get('build_patch.post', {});
 
@@ -106,7 +107,7 @@ function writeDockerfileStep (workflow, callback) {
     var path = this.profile.compconf.get('ident.tmppath') + '/Dockerfile';
 
     fs.writeFileSync(path, dockerfile.join('\n'));
-    fs.chmodSync(path, 0400);
+    fs.chmodSync(path, 0600);
 
     callback(null, true);
 }
@@ -169,6 +170,39 @@ Engine.prototype.build = function (workflow, callback) {
     callback(null, true);
 }
 
+Engine.prototype.stop = function (container, callback) {
+    if (!container.handleActive) {
+        // container probably died and we don't need to signal it
+        callback();
+
+        return;
+    }
+
+    container.handle.on(
+        'exit',
+        function () {
+            callback();
+        }
+    );
+
+    container.handle.kill('SIGTERM');
+}
+
+Engine.prototype.generateId = function (callback) {
+    child_process.exec(
+        'hostname -I | awk \'{ print $1 }\'',
+        function (error, stdout, stderr) {
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            callback(null, stdout.trim() + '-' + uuid.v4().replace(/-/g, '').substring(0, 8));
+        }
+    );
+}
+
 Engine.prototype.start = function (container, callback) {
     var args = [];
 
@@ -190,9 +224,7 @@ Engine.prototype.start = function (container, callback) {
         }
     );
 
-    container.setEnv('SCS_ENVIRONMENT', this.profile.runconf.get('name.environment'));
-    container.setEnv('SCS_ROLE', this.profile.runconf.get('name.role'));
-    container.setEnv('SCS_SERVICE', this.profile.runconf.get('name.service'));
+    container.setEnv('SCS_RUN_ID', container.id);
 
     var env = process.env;
     var nenv = container.getAllEnv();
@@ -204,6 +236,7 @@ Engine.prototype.start = function (container, callback) {
         }
     );
 
+    args.push('-cidfile', '/tmp/scs-' + container.id);
     args.push(this.profile.compconf.get('ident.image'));
 
     container.logger.verbose('container/run/env', JSON.stringify(env));
@@ -213,7 +246,8 @@ Engine.prototype.start = function (container, callback) {
         'docker',
         args,
         {
-            env : env
+            env : env,
+            detached : true
         }
     );
 
@@ -225,16 +259,26 @@ Engine.prototype.start = function (container, callback) {
         container.logger.verbose('container/run/stderr', data.toString('utf8'));
     });
 
-    handle.on('close', function (code) {
+    handle.on('exit', function (code) {
+        container.handleActive = false;
+
         container.logger.verbose('container/run/exit', code);
-        container.stop(function () {console.log('died'); });
+
+        if (!container.stopping) {
+            container.stop(function () {console.log('died'); });
+        }
     });
 
     container.handle = handle;
+    container.handleActive = true;
 
     setTimeout(
-        callback,
-        2500
+        function () {
+            container.handleId = fs.readFileSync('/tmp/scs-' + container.id);
+
+            callback();
+        },
+        5000
     );
 }
 

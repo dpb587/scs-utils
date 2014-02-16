@@ -25,6 +25,8 @@ Workflow.prototype.unshiftStep = function (topic, callback) {
 }
 
 Workflow.prototype.nextStep = function (error, result) {
+    var that = this;
+
     if (this.currStep) {
         this.logger.verbose(
             this.topic + '/' + this.currStep[0],
@@ -36,6 +38,15 @@ Workflow.prototype.nextStep = function (error, result) {
 
             return;
         }
+
+        this.currStep = null;
+        process.nextTick(
+            function () {
+                that.nextStep();
+            }
+        );
+
+        return;
     }
 
     this.currStep = this.steps.shift();

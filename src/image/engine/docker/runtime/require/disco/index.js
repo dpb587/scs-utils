@@ -71,6 +71,7 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
 
                 container.setEnv('SCS_REQUIRE_' + that.id.toUpperCase(), simplifyEndpoints(that.discoState));
 
+                callback1();
                 callback();
 
                 return;
@@ -87,13 +88,15 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
 
                 that.discoState = that.discoState.filter(
                     function (r) {
-                        return -1 < dropids.indexOf(r);
+                        return -1 < dropids.indexOf(r.id);
                     }
                 );
             }
 
             console.log('live update');
             console.log(simplifyEndpoints(that.discoState));
+
+            callback1();
         }
     );
 }
@@ -107,7 +110,10 @@ Requirement.prototype.onContainerStarted = function (steps, callback, container)
 }
 
 Requirement.prototype.onContainerStopped = function (steps, callback, container) {
-    callback();
+    this.getDiscoClient(container).dropRequirement(
+        this.discoId,
+        callback
+    );
 }
 
 Requirement.prototype.onContainerDown = function (steps, callback, container) {
@@ -115,6 +121,8 @@ Requirement.prototype.onContainerDown = function (steps, callback, container) {
 }
 
 Requirement.prototype.onContainerUnload = function (steps, callback, container) {
+    this.getDiscoClient(container).stop();
+
     callback();
 };
 

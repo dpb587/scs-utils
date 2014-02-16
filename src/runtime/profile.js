@@ -42,7 +42,12 @@ Profile.prototype.replaceImageManifest = function (callback) {
 
     this.imageconf = imageconf;
     this.compconf.unset('imageconf');
-    this.compconf.set('imageconf', this.imageconf.config);
+
+    if (0 < Object.keys(this.imageconf.config).length) {
+        this.compconf.set('imageconf', this.imageconf.config);
+    } else {
+        this.compconf.set('imageconf', null);
+    }
 }
 
 Profile.prototype.getContainerNetwork = function () {
@@ -311,7 +316,15 @@ function buildImageStep (workflow, callback) {
 }
 
 Profile.prototype.createImageBuildingWorkflow = function () {
+    var that = this;
     var workflow = new Workflow(this, this.logger, 'image-building');
+
+    workflow.pushStep(
+        'updating local',
+        function (workflow, callback) {
+            that.createGatheringWorkflow().run(callback);
+        }
+    );
 
     workflow.pushStep(
         'preparing image compilation',

@@ -49,28 +49,45 @@ Provision.prototype.onContainerUp = function (steps, callback, container) {
 }
 
 Provision.prototype.onContainerStarted = function (steps, callback, container) {
-    var disco = this.getDiscoClient(container);
+    var that = this;
+    var provide = this.profile.compconf.get('imageconf.runtime.provide.' + this.id);
 
-    this.discoId = disco.addProvision(
-        this.id,
-        {
-            address : container.getNetworkPublicAddress(),
-            port : 1234
-        },
-        {
-            environment : this.config.get('name.environment'),
-            service : this.config.get('name.service'),
-            role : this.config.get('name.role'),
-            attributes : this.config.get('attributes')
+    child_process.exec(
+        'docker port ' + container.handleId + ' ' + provide.port + '/' + (('protocol' in provide) ? provide.protocol : 'tcp'),
+        function (error, stdout, stderr) {
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            var split = stdout.trim().split(':');
+
+            that.discoId = that.getDiscoClient(container).addProvision(
+                that.id,
+                {
+                    address : ('0.0.0.0' == split[0]) ? container.getNetworkPublicAddress() : split[0],
+                    port : split[1]
+                },
+                {
+                    environment : that.config.get('name.environment'),
+                    service : that.config.get('name.service'),
+                    role : that.config.get('name.role'),
+                    attributes : that.config.get('attributes')
+                }
+            );
+
+            callback();
         }
     );
-
-    callback();
 }
 
 Provision.prototype.onContainerStopped = function (steps, callback, container) {
-    // @todo unregister
-    callback();
+    this.getDiscoClient(container).dropProvision(
+        this.discoId,
+        5000,
+        callback
+    );
 }
 
 Provision.prototype.onContainerDown = function (steps, callback, container) {
@@ -78,6 +95,8 @@ Provision.prototype.onContainerDown = function (steps, callback, container) {
 }
 
 Provision.prototype.onContainerUnload = function (steps, callback, container) {
+    this.getDiscoClient(container).stop();
+
     callback();
 };
 

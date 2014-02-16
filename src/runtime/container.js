@@ -1,4 +1,6 @@
 var Workflow = require('./workflow');
+var events = require('events');
+var util = require('util');
 
 // --
 
@@ -9,6 +11,7 @@ function createWorkflows () {
     workflows.load = new Workflow(this, this.logger, 'container/start/hook:load', [ this ]);
     workflows.up = new Workflow(this, this.logger, 'container/start/hook:up', [ this ]);
     workflows.started = new Workflow(this, this.logger, 'container/start/hook:started', [ this ]);
+
     workflows.stopped = new Workflow(this, this.logger, 'container/stop/hook:stopped', [ this ]);
     workflows.down = new Workflow(this, this.logger, 'container/stop/hook:down', [ this ]);
     workflows.unload = new Workflow(this, this.logger, 'container/stop/hook:unload', [ this ]);
@@ -59,9 +62,14 @@ function Container(profile, logger) {
     this.networkPublicAddress = null;
     this.provision = {};
 
+    this.handle = null;
+    this.stopping = false;
+
     this.storage = {};
     this.workflows = createWorkflows.call(this);
 }
+
+util.inherits(Container, events.EventEmitter);
 
 Container.prototype.setId = function (id) {
     this.id = id;
@@ -147,13 +155,31 @@ Container.prototype.retrieve = function (key, defaultCallback) {
 // --
 
 Container.prototype.start = function (callback) {
+    var that = this;
+
     var command = new Workflow(this, this.logger, 'container/start');
+
+    command.pushStep('id', function (workflow, callback1) {
+        this.engine.generateId(
+            function (error, result) {
+                if (error) {
+                    callback1(error);
+
+                    return;
+                }
+
+                that.id = that.engine.getType() + '-' + result;
+
+                callback1();
+            }
+        );
+    });
 
     command.pushStep('hook:load', function (workflow, callback1) {
         this.workflows.load.run(callback1);
     });
 
-    command.pushStep('engine/start', function (workflow, callback1) {
+    command.pushStep('engine:start', function (workflow, callback1) {
         this.engine.start(
             this,
             callback1
@@ -164,13 +190,49 @@ Container.prototype.start = function (callback) {
         this.workflows.up.run(callback1);
     });
 
-    command.pushStep('hook:started', function (workflow, callback2) {
-        this.workflows.started.run(callback2);
+    command.pushStep('hook:started', function (workflow, callback1) {
+        this.workflows.started.run(callback1);
     });
 
     command.run(
         function (error, result) {
-            console.log('asdfasdf');
+            callback(error, result);
+        }
+    );
+}
+
+Container.prototype.stop = function (callback) {
+    if (true === this.stopping) {
+        this.logger.silly('container/stop', 'ignored secondary stop call');
+
+        return;
+    }
+
+    this.stopping = true;
+
+    var command = new Workflow(this, this.logger, 'container/stop');
+
+    command.pushStep('hook:stopped', function (workflow, callback1) {
+        this.workflows.stopped.run(callback1);
+    });
+
+    command.pushStep('engine:stop', function (workflow, callback1) {
+        this.engine.stop(
+            this,
+            callback1
+        );
+    });
+
+    command.pushStep('hook:down', function (workflow, callback1) {
+        this.workflows.down.run(callback1);
+    });
+
+    command.pushStep('hook:unload', function (workflow, callback1) {
+        this.workflows.unload.run(callback1);
+    });
+
+    command.run(
+        function (error, result) {
             callback(error, result);
         }
     );
