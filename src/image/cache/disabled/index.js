@@ -1,6 +1,5 @@
-function Cache(profile, options, logger) {
-    this.profile = profile;
-    this.options = options;
+function Cache(cruntime, logger) {
+    this.cruntime = cruntime;
     this.logger = logger;
 }
 

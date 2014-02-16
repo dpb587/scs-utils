@@ -5,12 +5,11 @@ var uuid = require('node-uuid');
 
 // --
 
-function Engine(profile, config, logger) {
-    this.profile = profile;
-    this.config = config;
+function Engine(idents, cimage, cruntime, logger) {
+    this.idents = idents;
+    this.cimage = cimage;
+    this.cruntime = cruntime;
     this.logger = logger;
-
-    this.config.log(this.logger, 'silly', 'image/engine/docker/config');
 }
 
 Engine.prototype.getType = function () {
@@ -19,7 +18,7 @@ Engine.prototype.getType = function () {
 
 Engine.prototype.hasImage = function (callback) {
     var that = this;
-    var cmd = 'docker inspect "' + this.profile.compconf.get('ident.image') + '"';
+    var cmd = 'docker inspect "' + this.idents.get('global') + '"';
 
     this.logger.silly(
         'image/engine/docker/has-image/exec',
@@ -52,15 +51,15 @@ Engine.prototype.hasImage = function (callback) {
     );
 }
 
-function writeDockerfileStep (workflow, callback) {
+function writeDockerfileStep (workflow, callback, workdir) {
     dockerfile = []
 
-    dockerfile.push('FROM ' + this.profile.compconf.get('imageconf.engine.docker.from'));
-    dockerfile.push('ENV SCS_ENVIRONMENT ' + this.profile.runconf.get('name.environment'));
-    dockerfile.push('ENV SCS_SERVICE ' + this.profile.runconf.get('name.service'));
-    dockerfile.push('ENV SCS_ROLE ' + this.profile.runconf.get('name.role'));
+    dockerfile.push('FROM ' + this.cimage.get('from'));
+    dockerfile.push('ENV SCS_ENVIRONMENT ' + this.idents.get('environment'));
+    dockerfile.push('ENV SCS_SERVICE ' + this.idents.get('service'));
+    dockerfile.push('ENV SCS_ROLE ' + this.idents.get('role'));
 
-    if (true === this.profile.runconf.get('name.dev', false)) {
+    if (true === this.idents.get('dev', false)) {
         dockerfile.push('VOLUME /scs');
     } else {
         dockerfile.push('ADD . /scs');
@@ -82,10 +81,10 @@ function writeDockerfileStep (workflow, callback) {
         }
     );
 
-    dockerfile.push('EXPOSE 9001');
+    dockerfile.push('EXPOSE 9001/tcp');
     dockerfile.push('WORKDIR /scs');
 
-    var patchpre = this.config.get('build_patch.pre', {});
+    var patchpre = this.cruntime.get('build_patch.pre', {});
 
     Object.keys(patchpre).forEach(
         function (i) {
@@ -96,7 +95,7 @@ function writeDockerfileStep (workflow, callback) {
     dockerfile.push('RUN ./scs/compile');
     dockerfile.push('ENTRYPOINT [ "./scs/bin/run" ]');
 
-    var patchpost = this.config.get('build_patch.post', {});
+    var patchpost = this.cruntime.get('build_patch.post', {});
 
     Object.keys(patchpost).forEach(
         function (i) {

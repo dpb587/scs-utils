@@ -1,42 +1,36 @@
 var child_process = require('child_process');
 var fs = require('fs');
 var path = require('path');
+var yaml = require('js-yaml');
 
 // --
 
-function Source(profile, config, logger) {
-    this.profile = profile;
-    this.config = config;
+function Source(cruntime, logger) {
+    this.cruntime = cruntime;
     this.logger = logger;
-
-    this.config.log(this.logger, 'silly', 'image/source/git/config');
 }
 
-Source.prototype.getAbsoluteUri = function () {
-    var uri = this.profile.runconf.get('source.uri');
+Source.prototype.recompileCanonicalize = function (callback) {
+    var uri = this.cruntime.get('uri');
 
     if ('file://' == uri.substring(0, 7)) {
-        return 'file://' + path.resolve(process.cwd(), uri.substring(7));
+        uri = 'file://' + path.resolve(process.cwd(), uri.substring(7));
     }
 
-    return uri;
-}
-
-Source.prototype.resolveReference = function (callback) {
     var that = this;
-    var reference = this.profile.runconf.get('source.reference');
+    var reference = this.cruntime.get('reference');
 
     if (null === reference) {
         reference = 'master';
     }
 
     if (/^[a-f0-9]{40}$/.exec(reference)) {
-        callback(null, reference);
+        callback(null, { uri : uri, reference : reference });
 
         return;
     }
 
-    var cmd = 'git ls-remote "' + this.getAbsoluteUri() + '" | grep  -E \'refs/(heads|tags)/' + reference + '\' | awk \'{ print $1 }\'';
+    var cmd = this.cruntime.get('binary.git') + ' ls-remote "' + uri + '" | grep  -E \'refs/(heads|tags)/' + reference + '\' | awk \'{ print $1 }\'';
 
     this.logger.silly(
         'image/source/git/resolve-reference/exec',
@@ -62,14 +56,47 @@ Source.prototype.resolveReference = function (callback) {
                 return;
             }
 
-            callback(null, stdout.trim());
+            callback(
+                null,
+                {
+                    uri : uri,
+                    reference : stdout.trim()
+                }
+            );
         }
     );
 }
 
+Source.prototype.reloadImageManifest = function (callback) {
+    if ('file://' == this.cruntime.get('uri').substring(0, 7)) {
+        var cmd = this.cruntime.get('binary.git') + ' show ' + this.cruntime.get('reference') + ':scs/image.yaml';
+
+        child_process.exec(
+            cmd,
+            {
+                env : {
+                    GIT_DIR : this.cruntime.get('uri').substring(7) + '/.git'
+                }
+            },
+            function (error, stdout, stderr) {
+                if (error) {
+                    callback(error);
+
+                    return;
+                }
+
+                callback(null, yaml.safeLoad(stdout));
+            }
+        );
+    } else {
+        // long form
+        callback(new Error('asdf'));
+    }
+}
+
 function checkoutWorkingDirectoryStep (workflow, callback) {
     var that = this;
-    var cmd = 'git checkout -q "' + this.profile.compconf.get('source.reference_canonical') + '"';
+    var cmd = this.cruntime.get('binary.git') + ' checkout -q "' + this.profile.compconf.get('reference') + '"';
 
     this.logger.silly(
         'image/source/git/checkout/exec',
@@ -107,7 +134,7 @@ function checkoutWorkingDirectoryStep (workflow, callback) {
 
 function cloneWorkingDirectoryStep (workflow, callback) {
     var that = this;
-    var cmd = 'git clone "' + this.getAbsoluteUri() + '" "' + this.profile.compconf.get('ident.tmppath') + '"';
+    var cmd = this.cruntime.get('binary.git') + ' clone "' + this.getAbsoluteUri() + '" "' + this.profile.compconf.get('ident.tmppath') + '"';
 
     this.logger.silly(
         'image/source/git/clone/exec',
@@ -142,7 +169,7 @@ function cloneWorkingDirectoryStep (workflow, callback) {
 
 function fetchWorkingDirectoryStep (workflow, callback) {
     var that = this;
-    var cmd = 'git fetch';
+    var cmd = this.cruntime.get('binary.git') + ' fetch';
 
     this.logger.silly(
         'image/source/git/fetch/exec',

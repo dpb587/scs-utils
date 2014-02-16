@@ -2,12 +2,9 @@ var AWS = require('aws-sdk');
 
 // --
 
-function Cache(profile, config, logger) {
-    this.profile = profile;
-    this.config = config;
+function Cache(cruntime, logger) {
+    this.cruntime = cruntime;
     this.logger = logger;
-
-    this.config.log(this.logger, 'silly', 'image/cache/aws-s3/config');
 
     this.apiClient = null;
 }
@@ -24,19 +21,19 @@ Cache.prototype.isAvailable = function () {
     return true;
 }
 
-Cache.prototype.has = function (callback) {
-    var bucket = this.config.get('bucket');
-    var key = this.config.get('prefix') + this.profile.compconf.get('ident.image');
+Cache.prototype.has = function (key, callback) {
+    var bucket = this.cruntime.get('bucket');
+    var s3key = this.cruntime.get('prefix') + key;
 
     this.logger.silly(
         'image/cache/aws-s3',
-        'checking "s3://' + bucket + '/' + key + '"'
+        'checking "s3://' + bucket + '/' + s3key + '"'
     );
 
     this.getApiClient().headObject(
         {
             Bucket : bucket,
-            Key : key
+            Key : s3key
         },
         function (error, result) {
             if (error) {

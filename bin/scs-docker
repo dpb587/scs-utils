@@ -5,11 +5,8 @@ var os = require('os');
 var path = require('path');
 var util = require('util');
 
-var CompiledConfig = require('../src/config/compiled');
-var CoreConfig = require('../src/config/core');
-var RuntimeConfig = require('../src/config/runtime');
-var Profile = require('../src/runtime/profile');
-var Workflow = require('../src/runtime/workflow');
+var Config = require('../src/util/config');
+var Profile = require('../src/util/profile');
 
 // --
 
@@ -17,13 +14,10 @@ var cli = new (require('argparse').ArgumentParser)({ description : 'Create a dyn
 
 cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 
-cli.addArgument([ '--config' ], { help : 'specify a config value', defaultValue : [], metavar : 'KEY=VALUE', action : 'append' });
-cli.addArgument([ '--config-file' ], { help : 'a core configuration file (json, yaml)', defaultValue : [], metavar : 'PATH', action : 'append' });
-
-cli.addArgument([ '--compiled-file' ], { help : 'file to cache compiled and loaded configuration', defaultValue : 'compiled.json', metavar : 'PATH' });
+cli.addArgument([ '--compiled-file' ], { help : 'file to store compiled configuration', defaultValue : 'compiled.json', metavar : 'PATH' });
 
 cli.addArgument([ 'command' ], { help : 'command to run', choices : [ 'cache-put', 'cache-get', 'build', 'run', 'run-load', 'run-unload' ] });
-cli.addArgument([ 'runconf' ], { help : 'file containing the runtime configuration', defaultValue : [ 'runtime.json' ], nargs : '*' });
+cli.addArgument([ 'runconf' ], { help : 'file(s) containing the runtime configuration', defaultValue : [ 'runtime.json' ], nargs : '*' });
 
 var cliargs = cli.parseArgs();
 
@@ -32,9 +26,13 @@ logger.level = cliargs.log_level;
 
 // --
 
+var profile;
+
+// --
+
 process.on('exit', function () {
-    if (compconf) {
-        fs.writeFileSync(cliargs.compiled_file, JSON.stringify(compconf.config, null, 2));
+    if (profile && profile.ccompiled) {
+        fs.writeFileSync(cliargs.compiled_file, JSON.stringify(profile.ccompiled.config, null, 2));
     }
 });
 
@@ -53,7 +51,6 @@ function abspath(p) {
     return path.resolve(process.cwd(), p);
 }
 
-cliargs.config_file = cliargs.config_file.map(abspath);
 cliargs.runconf = cliargs.runconf.map(abspath);
 cliargs.compiled_file = abspath(cliargs.compiled_file);
 
@@ -61,27 +58,43 @@ logger.verbose('process/args', JSON.stringify(cliargs));
 
 // --
 
-var coreconf = new CoreConfig();
-coreconf.importFiles(cliargs.config_file);
-coreconf.importArrayPairs(cliargs.config);
-coreconf.log(logger, 'silly', 'process/coreconf');
+var cruntime = new Config();
+cruntime.importFiles(cliargs.runconf);
+cruntime.log(logger, 'silly', 'scs/runtime');
 
 // --
 
-var runconf = new RuntimeConfig();
-runconf.importFiles(cliargs.runconf);
-runconf.log(logger, 'silly', 'process/runconf');
-
-// --
-
-var compconf = new CompiledConfig();
+var ccompiled = new Config();
 
 if (fs.existsSync(cliargs.compiled_file)) {
-    compconf.importFile(cliargs.compiled_file);
+    ccompiled.importFile(cliargs.compiled_file);
 }
 
-compconf.log(logger, 'silly', 'process/compconf');
+ccompiled.log(logger, 'silly', 'scs/compiled');
 
+// --
+
+var profile = new Profile(cruntime, ccompiled, logger);
+
+if (profile.needsRecompilation()) {
+    profile.recompile(function (error, result) {
+        if (error) {
+            throw error;
+
+            return;
+        }
+
+        console.log(JSON.stringify(profile.ccompiled.config, null, 2));
+    });
+}
+
+return;
+
+
+// --
+
+
+return;
 // --
 
 var profile = new Profile(
