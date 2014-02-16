@@ -8,8 +8,6 @@ function Volume(id, cimage, cruntime, logger) {
     this.cimage = cimage;
     this.cruntime = cruntime;
     this.logger = logger;
-
-    this.cruntime.log(this.logger, 'silly', 'container/volume/' + this.id + '/cruntime');
 }
 
 Volume.prototype.onContainerLoad = function (steps, callback, container) {

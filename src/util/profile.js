@@ -393,6 +393,13 @@ function recompileContainer (workflow, callback) {
     this.ccompiled.set('container.name.environment', this.cruntime.get('container.name.environment'));
     this.ccompiled.set('container.name.service', this.cruntime.get('container.name.service'));
     this.ccompiled.set('container.name.role', this.cruntime.get('container.name.role'));
+    this.ccompiled.set(
+        'container.name.local',
+        this.cruntime.get(
+            'container.name.local',
+            this.ccompiled.get('container.name.environment') + '-' + this.ccompiled.get('container.name.service') + '-' + this.ccompiled.get('container.name.role')
+        )
+    );
 
 
     this.ccompiled.set('container.dependency.provide', null);

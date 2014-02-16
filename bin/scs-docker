@@ -167,8 +167,6 @@ switch (cliargs.command) {
                                     }
 
                                     logger.info('process/exit', 'container stopped');
-
-                                    process.exit(0);
                                 }
                             );
                         }

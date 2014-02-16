@@ -1,5 +1,7 @@
 var child_process = require('child_process');
-var DiscoTcpClient = require('../../../../../../../disco/service/tcp/client/service');
+var util = require('util');
+
+var DiscoDependencyBase = require('../../../../../common/container/dependency/common/disco');
 
 // --
 
@@ -9,39 +11,14 @@ function Requirement(id, cimage, ccontainer, logger) {
     this.ccontainer = ccontainer;
     this.logger = logger;
 
-    this.discoId = null;
     this.discoState = null;
+
+    DiscoDependencyBase.call(this);
 }
 
-Requirement.prototype.getDiscoClient = function (container) {
-    var that = this;
+util.inherits(Requirement, DiscoDependencyBase);
 
-    return container.retrieve(
-        'disco_' + this.ccontainer.get('server.address') + '_' + this.ccontainer.get('server.port'),
-        function () {
-            var disco = new DiscoTcpClient(
-                {
-                    server : that.ccontainer.get('server')
-                },
-                that.logger
-            );
-
-            disco.start();
-
-            return disco;
-        }
-    );
-}
-
-function simplifyEndpoints (state) {
-    var endpoints = [];
-
-    state.forEach(function (endpoint) {
-        endpoints.push(endpoint.address.address + ':' + endpoint.address.port);
-    });
-
-    return endpoints.join(';');
-}
+// --
 
 Requirement.prototype.onContainerLoad = function (steps, callback, container) {
     var that = this;
@@ -200,6 +177,18 @@ Requirement.prototype.onContainerUnload = function (steps, callback, container) 
 
     callback();
 };
+
+// --
+
+function simplifyEndpoints (state) {
+    var endpoints = [];
+
+    state.forEach(function (endpoint) {
+        endpoints.push(endpoint.address.address + ':' + endpoint.address.port);
+    });
+
+    return endpoints.join(';');
+}
 
 // --
 

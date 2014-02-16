@@ -1,5 +1,7 @@
 var child_process = require('child_process');
-var DiscoTcpClient = require('../../../../../../../disco/service/tcp/client/service');
+var util = require('util');
+
+var DiscoDependencyBase = require('../../../../../common/container/dependency/common/disco');
 
 // --
 
@@ -9,30 +11,12 @@ function Provision(id, cimage, ccontainer, logger) {
     this.ccontainer = ccontainer;
     this.logger = logger;
 
-    this.discoId = null;
+    DiscoDependencyBase.call(this);
 }
+
+util.inherits(Provision, DiscoDependencyBase);
 
 // --
-
-Provision.prototype.getDiscoClient = function (container) {
-    var that = this;
-
-    return container.retrieve(
-        'disco_' + this.ccontainer.get('server.address') + '_' + this.ccontainer.get('server.port'),
-        function () {
-            var disco = new DiscoTcpClient(
-                {
-                    server : that.ccontainer.get('server')
-                },
-                that.logger
-            );
-
-            disco.start();
-
-            return disco;
-        }
-    );
-}
 
 Provision.prototype.onContainerLoad = function (steps, callback, container) {
     container.env.setExposedPort(

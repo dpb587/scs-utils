@@ -1,5 +1,4 @@
 var Config = require('../../../../../../../util/config');
-var uuid = require('node-uuid');
 
 // --
 
@@ -11,7 +10,7 @@ module.exports.compileContainerConfig = function (names, id, configs) {
     cruntime.set('autocreate', true);
     cruntime.set('autopurge', false);
     cruntime.set('mode', '0700');
-    cruntime.set('path', '/tmp/scs-' + names.get('uid', uuid.v4()));
+    cruntime.set('path', '/tmp/scs-' + names.get('local'));
 
     configs.forEach(function (config) {
         cruntime.importObject(config);
