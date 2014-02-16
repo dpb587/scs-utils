@@ -1,0 +1,87 @@
+#!/usr/bin/env node
+
+var fs = require('fs');
+var os = require('os');
+var path = require('path');
+var util = require('util');
+
+var Config = require('../src/util/config');
+
+// --
+
+var cli = new (require('argparse').ArgumentParser)({ description : 'Utility for provisioning and mounting AWS EC2 EBS volumes.' });
+
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+
+cli.addArgument([ '--mkfs-type' ], { help : 'Disk format for new volumes (passed as -t to mkfs)', defaultValue : 'ext4' });
+cli.addArgument([ '--mkfs-args' ], { help : 'Arbitrary format options passed to mkfs for new volumes' });
+
+cli.addArgument([ '--volume-size' ], { help : 'Size for new volumes; in GB', metavar : 'N' });
+cli.addArgument([ '--volume-type' ], { help : 'Volume type for new volumes', metavar : 'TYPE' });
+cli.addArgument([ '--volume-iops' ], { help : 'IOPS for new, provisioned volumes', metavar : 'INT' });
+cli.addArgument([ '--volume-snapshot-id' ], { help : 'Snapshot ID for new volumes (e.g. snap-abcd1234)', metavar : 'SNAPSHOT_ID' });
+
+cli.addArgument([ '--fstab' ], { help : 'update file system table', action : 'storeTrue' });
+
+cli.addArgument([ 'envname' ], { help : 'environment name' });
+cli.addArgument([ 'servicename' ], { help : 'service name' });
+cli.addArgument([ 'rolename' ], { help : 'role name' });
+cli.addArgument([ 'device' ], { help : 'mount device' });
+cli.addArgument([ 'path' ], { help : 'mount path' });
+
+var cliargs = cli.parseArgs();
+
+// --
+
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
+
+logger.silly('process/args', JSON.stringify(cliargs));
+
+// --
+
+var cliconfig = new Config();
+cliconfig.set('mount.device', cliargs.device);
+cliconfig.set('mount.path', cliargs.path);
+cliconfig.set('mount.fstab', cliargs.fstab);
+cliconfig.set('mkfs.type', cliargs.mkfs_type);
+cliconfig.set('mkfs.args', cliargs.mkfs_args);
+cliconfig.set('volume.size', cliargs.volume_size);
+cliconfig.set('volume.type', cliargs.volume_type);
+cliconfig.set('volume.iops', cliargs.volume_iops);
+cliconfig.set('volume.snapshot_id', cliargs.volume_snapshot_id);
+
+var Volume = new require('../src/image/engine/docker/container/dependency/volume/aws-ec2-ebs');
+var volume = new Volume(
+    'cli',
+    new Config(),
+    new Config(
+        require('../src/image/engine/docker/container/dependency/volume/aws-ec2-ebs/compiler').compileContainerConfig(
+            new Config({
+                environment : cliargs.envname,
+                service : cliargs.servicename,
+                role : cliargs.rolename,
+                local : cliargs.envname + '-' + cliargs.servicename + '-' + cliargs.rolename
+            }),
+            'cli',
+            [ cliconfig.config ]
+        )
+    ),
+    logger
+);
+
+volume.onContainerLoad(
+    {},
+    function (error, result) {
+        if (error) {
+            throw error;
+
+            return;
+        }
+
+        logger.info('done');
+    },
+    {
+        env : require('../src/image/engine/common/container/environment')
+    }
+);

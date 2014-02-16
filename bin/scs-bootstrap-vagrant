@@ -2,10 +2,16 @@
 
 set -e
 
-sudo locale-gen en_US.UTF-8
+locale-gen en_US.UTF-8
+
+
+# apt-cacher
+apt-get -y install apt-cacher
+
 
 # core tools
-apt-get -y install git python-pip
+apt-get -y install git
+
 
 # node
 mkdir /usr/local/nodejs
@@ -14,14 +20,21 @@ wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -x
 ln -s $PWD/bin/* /usr/bin/
 popd
 
+
 # scs-utils
-ln -s /vagrant/scs-utils /usr/local/scs-utils
+if [ -e /vagrant/scs-utils ]; then
+    ln -s /vagrant/scs-utils /usr/local/scs-utils
+else
+    git clone -b disco git@github.com:dpb587/scs-utils.git /usr/local/scs-utils
+fi
+
 pushd /usr/local/scs-utils
 pip install --upgrade -r requirements.txt
 npm install
 ( cd node_modules/node-etcd/ && npm install && npm run-script build )
 ln -s $PWD/bin/* /usr/bin/
 popd
+
 
 # docker
 wget -qO- https://get.docker.io/gpg | apt-key add -
@@ -30,8 +43,9 @@ apt-get update
 apt-get install -y linux-image-extra-`uname -r`
 apt-get install -y lxc-docker
 
+
 # supervisor
-apt-get install -y python-pip python-setuptools
+apt-get install -y python-setuptools
 easy_install supervisor
 mkdir -p /var/{log,run}/supervisor
 mkdir -p /etc/supervisor
@@ -43,15 +57,15 @@ file=/var/run/supervisor.sock   ; (the path to the socket file)
 port=127.0.0.1:9001
 
 [supervisord]
-logfile=/var/log/supervisor/supervisord.log                     ; (main log file;default $CWD/supervisord.log)
-logfile_maxbytes=500MB   ; (max main logfile bytes b4 rotation;default 50MB)
-logfile_backups=10     ; (num of main logfile rotation backups;default 10)
-loglevel=info                  ; (log level;default info; others: debug,warn,trace)
-pidfile=/var/run/supervisord.pid            ; (supervisord pidfile;default supervisord.pid)
-nodaemon=false                              ; (start in foreground if true;default false)
-minfds=1024                       ; (min. avail startup file descriptors;default 1024)
-minprocs=200                   ; (min. avail process descriptors;default 200)
-childlogdir=/var/log/supervisor             ; ('AUTO' child log dir, default $TEMP)
+logfile=/var/log/supervisor/supervisord.log
+logfile_maxbytes=256MB
+logfile_backups=4
+loglevel=info
+pidfile=/var/run/supervisord.pid
+nodaemon=false
+minfds=1024
+minprocs=200
+childlogdir=/var/log/supervisor
 nocleanup=false
 umask=022
 
@@ -59,7 +73,7 @@ umask=022
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [supervisorctl]
-serverurl=unix:///var/run/supervisor.sock ; use a unix:// URL  for a unix socket
+serverurl=unix:///var/run/supervisor.sock
 
 [include]
 files = /etc/supervisor/*.ini

@@ -5,16 +5,16 @@ var Config = require('../../../../../../../util/config');
 module.exports = {};
 
 module.exports.compileContainerConfig = function (names, id, configs) {
-    var cruntime = new Config();
+    var ccontainer = new Config();
 
-    cruntime.set('autocreate', true);
-    cruntime.set('autopurge', false);
-    cruntime.set('mode', '0700');
-    cruntime.set('path', '/tmp/scs-' + names.get('local'));
+    ccontainer.set('autocreate', true);
+    ccontainer.set('autopurge', false);
+    ccontainer.set('mode', '0700');
+    ccontainer.set('path', '/var/lib/scs-utils/volume--local--' + names.get('local'));
 
     configs.forEach(function (config) {
-        cruntime.importObject(config);
+        ccontainer.importObject(config);
     });
 
-    return cruntime.config;
+    return ccontainer.config;
 }

@@ -1,11 +1,10 @@
 {
     "dependencies" : {
+        "aws-sdk" : "2.0.0-rc9",
         "argparse" : "*",
-        "npmlog" : "0.0.6",
-        "node-etcd" : "2.0.8",
         "js-yaml" : "3.0.1",
         "node-uuid" : "1.4.1",
-        "aws-sdk" : "2.0.0-rc9"
+        "npmlog" : "0.0.6"
     },
     "devDependencies" : {
         "istanbul" : "0.2.3",
