@@ -1,24 +1,27 @@
 var child_process = require('child_process');
 var fs = require('fs');
 var path = require('path');
+
 var yaml = require('js-yaml');
+
+var Workflow = require('../../../util/workflow');
 
 // --
 
-function Source(cruntime, logger) {
-    this.cruntime = cruntime;
+function Source(cimage, logger) {
+    this.cimage = cimage;
     this.logger = logger;
 }
 
 Source.prototype.recompileCanonicalize = function (callback) {
-    var uri = this.cruntime.get('uri');
+    var uri = this.cimage.get('uri');
 
     if ('file://' == uri.substring(0, 7)) {
         uri = 'file://' + path.resolve(process.cwd(), uri.substring(7));
     }
 
     var that = this;
-    var reference = this.cruntime.get('reference');
+    var reference = this.cimage.get('reference');
 
     if (null === reference) {
         reference = 'master';
@@ -30,7 +33,7 @@ Source.prototype.recompileCanonicalize = function (callback) {
         return;
     }
 
-    var cmd = this.cruntime.get('binary.git') + ' ls-remote "' + uri + '" | grep  -E \'refs/(heads|tags)/' + reference + '\' | awk \'{ print $1 }\'';
+    var cmd = this.cimage.get('binary.git') + ' ls-remote "' + uri + '" | grep  -E \'refs/(heads|tags)/' + reference + '\' | awk \'{ print $1 }\'';
 
     this.logger.silly(
         'image/source/git/resolve-reference/exec',
@@ -68,14 +71,14 @@ Source.prototype.recompileCanonicalize = function (callback) {
 }
 
 Source.prototype.reloadImageManifest = function (callback) {
-    if ('file://' == this.cruntime.get('uri').substring(0, 7)) {
-        var cmd = this.cruntime.get('binary.git') + ' show ' + this.cruntime.get('reference') + ':scs/image.yaml';
+    if ('file://' == this.cimage.get('uri').substring(0, 7)) {
+        var cmd = this.cimage.get('binary.git') + ' show ' + this.cimage.get('reference') + ':scs/image.yaml';
 
         child_process.exec(
             cmd,
             {
                 env : {
-                    GIT_DIR : this.cruntime.get('uri').substring(7) + '/.git'
+                    GIT_DIR : this.cimage.get('uri').substring(7) + '/.git'
                 }
             },
             function (error, stdout, stderr) {
@@ -94,29 +97,45 @@ Source.prototype.reloadImageManifest = function (callback) {
     }
 }
 
-function checkoutWorkingDirectoryStep (workflow, callback) {
+Source.prototype.createWorkingDirectory = function (workdir, callback) {
+    var workflow = new Workflow(this, this.logger, 'image/source/git/working-directory', [ workdir ]);
+    workflow.pushStep(
+        'fetch-or-clone',
+        function (workflow, callback1, workdir) {
+            if (fs.existsSync(workdir + '/.git')) {
+                createWorkingDirectory_Fetch.call(this, workflow, callback1, workdir);
+            } else {
+                createWorkingDirectory_Clone.call(this, workflow, callback1, workdir);
+            }
+        }.bind(this)
+    );
+    workflow.pushStep('checkout', createWorkingDirectory_Checkout);
+    workflow.run(callback);
+}
+
+function createWorkingDirectory_Checkout (workflow, callback, workdir) {
     var that = this;
-    var cmd = this.cruntime.get('binary.git') + ' checkout -q "' + this.profile.compconf.get('reference') + '"';
+    var cmd = this.cimage.get('binary.git') + ' checkout -q "' + this.cimage.get('reference') + '"';
 
     this.logger.silly(
-        'image/source/git/checkout/exec',
+        workflow.currStepTopic + '/exec',
         cmd
     );
 
     child_process.exec(
         cmd,
         {
-            cwd : this.profile.compconf.get('ident.tmppath')
+            cwd : workdir
         },
         function (error, stdout, stderr) {
             that.logger.silly(
-                'image/source/git/checkout/stdout',
+                workflow.currStepTopic + '/stdout',
                 stdout
             );
 
             if (stderr) {
                 that.logger.verbose(
-                    'image/source/git/checkout/stderr',
+                    workflow.currStepTopic + '/stderr',
                     stderr
                 );
             }
@@ -132,64 +151,29 @@ function checkoutWorkingDirectoryStep (workflow, callback) {
     );
 }
 
-function cloneWorkingDirectoryStep (workflow, callback) {
+function createWorkingDirectory_Clone (workflow, callback, workdir) {
     var that = this;
-    var cmd = this.cruntime.get('binary.git') + ' clone "' + this.getAbsoluteUri() + '" "' + this.profile.compconf.get('ident.tmppath') + '"';
+    var cmd = this.cimage.get('binary.git') + ' clone "' + this.cimage.get('uri') + '" "' + workdir + '"';
 
     this.logger.silly(
-        'image/source/git/clone/exec',
-        cmd
-    );
-
-    child_process.exec(
-        cmd,
-        function (error, stdout, stderr) {
-            that.logger.silly(
-                'image/source/git/clone/stdout',
-                stdout
-            );
-
-            if (stderr) {
-                that.logger.verbose(
-                    'image/source/git/clone/stderr',
-                    stderr
-                );
-            }
-
-            if (error) {
-                callback(error);
-
-                return;
-            }
-
-            callback(null, true);
-        }
-    );
-}
-
-function fetchWorkingDirectoryStep (workflow, callback) {
-    var that = this;
-    var cmd = this.cruntime.get('binary.git') + ' fetch';
-
-    this.logger.silly(
-        'image/source/git/fetch/exec',
+        workflow.currStepTopic + '/exec',
         cmd
     );
 
     child_process.exec(
         cmd,
         {
-            cwd : this.profile.compconf.get('ident.tmppath')
+            cwd : workdir
         },
         function (error, stdout, stderr) {
             that.logger.silly(
-                'image/source/git/fetch/stdout',
+                workflow.currStepTopic + '/stdout',
                 stdout
             );
 
             if (stderr) {
                 that.logger.verbose(
-                    'image/source/git/fetch/stderr',
+                    workflow.currStepTopic + '/stderr',
                     stderr
                 );
             }
@@ -205,27 +189,42 @@ function fetchWorkingDirectoryStep (workflow, callback) {
     );
 }
 
-Source.prototype.createWorkingDirectoryStep = function (workflow, callback) {
+function createWorkingDirectory_Fetch (workflow, callback, workdir) {
     var that = this;
+    var cmd = this.cimage.get('binary.git') + ' fetch';
 
-    workflow.unshiftStep(
-        'checking out reference',
-        checkoutWorkingDirectoryStep.bind(this)
+    this.logger.silly(
+        workflow.currStepTopic + '/exec',
+        cmd
     );
 
-    if (fs.existsSync(this.profile.compconf.get('ident.tmppath') + '/.git')) {
-        workflow.unshiftStep(
-            'fetching upstream repository',
-            fetchWorkingDirectoryStep.bind(this)
-        );
-    } else {
-        workflow.unshiftStep(
-            'cloning upstream repository',
-            cloneWorkingDirectoryStep.bind(this)
-        );
-    }
+    child_process.exec(
+        cmd,
+        {
+            cwd : workdir
+        },
+        function (error, stdout, stderr) {
+            that.logger.silly(
+                workflow.currStepTopic + '/stdout',
+                stdout
+            );
 
-    callback(null, true);
+            if (stderr) {
+                that.logger.verbose(
+                    workflow.currStepTopic + '/stderr',
+                    stderr
+                );
+            }
+
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            callback(null, true);
+        }
+    );
 }
 
 // --

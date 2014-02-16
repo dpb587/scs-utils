@@ -1,21 +1,22 @@
 var fs = require('fs');
+
 var yaml = require('js-yaml');
 
-function Configurator(idents, cimage, cruntime, logger) {
-    this.idents = idents;
+var Workflow = require('../../../util/workflow');
+
+// --
+
+function Configurator(cimage, logger) {
     this.cimage = cimage;
-    this.cruntime = cruntime;
     this.logger = logger;
 }
 
-function writePuppetConfigurationStep (workflow, callback, workdir) {
-    puppetfile = [
-        '$SCS_ENVIRONMENT = "' + this.idents.get('environment') + '"',
-        '$SCS_SERVICE = "' + this.idents.get('service') + '"',
-        '$SCS_ROLE = "' + this.idents.get('role') + '"'
-    ]
+// --
 
-    var config = this.cruntime.get('definitions');
+function writePuppetConfigurationStep (workflow, callback, workdir) {
+    puppetfile = [];
+
+    var config = this.cimage.get('config', {});
 
     if (!('main' in config)) {
         puppetfile.push('include scs');
@@ -35,6 +36,8 @@ function writePuppetConfigurationStep (workflow, callback, workdir) {
                         );
                     }
                 );
+            } else if ('_method' == part) {
+                // internal config laziness
             } else {
                 Object.keys(config[part]).forEach(
                     function (name) {
@@ -81,16 +84,22 @@ function writeCompilationScriptStep (workflow, callback, workdir) {
     callback(null, true);
 }
 
-Configurator.prototype.appendCompilationSteps = function (workflow) {
+Configurator.prototype.build = function (workdir, callback) {
+    var workflow = new Workflow(this, this.logger, 'image/config/puppet/build', [ workdir ]);
+
     workflow.pushStep(
-        'writing puppet configuration',
-        writePuppetConfigurationStep.bind(this)
+        'write-puppet-config',
+        writePuppetConfigurationStep
     );
 
     workflow.pushStep(
-        'writing compilation script',
-        writeCompilationScriptStep.bind(this)
+        'write-compile-script',
+        writeCompilationScriptStep
     );
+
+    workflow.run(callback);
 }
+
+// --
 
 module.exports = Configurator;

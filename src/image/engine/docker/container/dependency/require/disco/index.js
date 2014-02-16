@@ -1,12 +1,12 @@
 var child_process = require('child_process');
-var DiscoTcpClient = require('../../../../../../disco/service/tcp/client/service');
+var DiscoTcpClient = require('../../../../../../../disco/service/tcp/client/service');
 
 // --
 
-function Requirement(id, cimage, cruntime, logger) {
+function Requirement(id, cimage, ccontainer, logger) {
     this.id = id;
     this.cimage = cimage;
-    this.cruntime = cruntime;
+    this.ccontainer = ccontainer;
     this.logger = logger;
 
     this.discoId = null;
@@ -17,11 +17,11 @@ Requirement.prototype.getDiscoClient = function (container) {
     var that = this;
 
     return container.retrieve(
-        'disco_' + this.cruntime.get('server.address') + '_' + this.cruntime.get('server.port'),
+        'disco_' + this.ccontainer.get('server.address') + '_' + this.ccontainer.get('server.port'),
         function () {
             var disco = new DiscoTcpClient(
                 {
-                    server : that.cruntime.get('server')
+                    server : that.ccontainer.get('server')
                 },
                 that.logger
             );
@@ -50,18 +50,16 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
     this.discoId = disco.addRequirement(
         this.id,
         {
-            environment : this.cruntime.get('name.environment'),
-            service : this.cruntime.get('name.service'),
-            role : this.cruntime.get('name.role'),
-            attributes : this.cruntime.get('attributes')
+            environment : this.ccontainer.get('name.environment'),
+            service : this.ccontainer.get('name.service'),
+            role : this.ccontainer.get('name.role'),
+            attributes : this.ccontainer.get('attributes')
         },
         function (action, endpoints, callback1) {
             if ('initial' == action) {
-                console.log(endpoints);
-
                 that.discoState = endpoints;
 
-                container.setEnv('SCS_REQUIRE_' + that.id.toUpperCase(), simplifyEndpoints(that.discoState));
+                container.env.setVariable('SCS_REQUIRE_' + that.id.toUpperCase(), simplifyEndpoints(that.discoState));
 
                 callback1();
                 callback();
@@ -85,8 +83,7 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
                 );
             }
 
-            console.log('live update');
-            console.log(simplifyEndpoints(that.discoState));
+            console.log('@todo live update w/ ' + simplifyEndpoints(that.discoState));
 
             callback1();
         }

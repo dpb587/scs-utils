@@ -29,7 +29,7 @@ Workflow.prototype.nextStep = function (error, result) {
 
     if (this.currStep) {
         this.logger.verbose(
-            this.topic + '/' + this.currStep[0],
+            this.currStepTopic,
             (error ? 'failure' : 'success')
         );
 
@@ -57,8 +57,10 @@ Workflow.prototype.nextStep = function (error, result) {
         return;
     }
 
+    this.currStepTopic = this.topic + '/' + this.currStep[0];
+
     this.logger.verbose(
-        this.topic + '/' + this.currStep[0],
+        this.currStepTopic,
         'running...'
     );
 

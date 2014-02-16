@@ -5,7 +5,7 @@ var Config = require('../../../util/config');
 
 module.exports = {};
 
-module.exports.compileRuntimeConfig = function (configs) {
+module.exports.compileImageConfig = function (configs) {
     var cruntime = new Config();
 
     cruntime.set('binary.git', 'git');

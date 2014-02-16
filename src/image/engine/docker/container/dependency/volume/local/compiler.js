@@ -1,4 +1,4 @@
-var Config = require('../../../../../../util/config');
+var Config = require('../../../../../../../util/config');
 var uuid = require('node-uuid');
 
 // --

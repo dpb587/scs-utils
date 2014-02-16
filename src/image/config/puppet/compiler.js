@@ -11,5 +11,5 @@ module.exports.compileImageConfig = function (configs) {
         cimage.importObject(config);
     });
 
-    return cimage;
+    return cimage.config;
 }

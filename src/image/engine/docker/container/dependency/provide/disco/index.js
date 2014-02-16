@@ -1,12 +1,12 @@
 var child_process = require('child_process');
-var DiscoTcpClient = require('../../../../../../disco/service/tcp/client/service');
+var DiscoTcpClient = require('../../../../../../../disco/service/tcp/client/service');
 
 // --
 
-function Provision(id, cimage, cruntime, logger) {
+function Provision(id, cimage, ccontainer, logger) {
     this.id = id;
     this.cimage = cimage;
-    this.cruntime = cruntime;
+    this.ccontainer = ccontainer;
     this.logger = logger;
 
     this.discoId = null;
@@ -18,11 +18,11 @@ Provision.prototype.getDiscoClient = function (container) {
     var that = this;
 
     return container.retrieve(
-        'disco_' + this.cruntime.get('server.address') + '_' + this.cruntime.get('server.port'),
+        'disco_' + this.ccontainer.get('server.address') + '_' + this.ccontainer.get('server.port'),
         function () {
             var disco = new DiscoTcpClient(
                 {
-                    server : that.cruntime.get('server')
+                    server : that.ccontainer.get('server')
                 },
                 that.logger
             );
@@ -35,6 +35,12 @@ Provision.prototype.getDiscoClient = function (container) {
 }
 
 Provision.prototype.onContainerLoad = function (steps, callback, container) {
+    container.env.setExposedPort(
+        this.id,
+        this.cimage.get('protocol'),
+        this.cimage.get('port')
+    );
+
     callback();
 }
 
@@ -46,7 +52,7 @@ Provision.prototype.onContainerStarted = function (steps, callback, container) {
     var that = this;
 
     child_process.exec(
-        'docker port ' + container.handleId + ' ' + this.cimage.port + '/' + this.cimage.protocol),
+        'docker port ' + container.dockerContainerId + ' ' + this.cimage.get('port') + '/' + this.cimage.get('protocol'),
         function (error, stdout, stderr) {
             if (error) {
                 callback(error);
@@ -59,14 +65,14 @@ Provision.prototype.onContainerStarted = function (steps, callback, container) {
             that.discoId = that.getDiscoClient(container).addProvision(
                 that.id,
                 {
-                    address : ('0.0.0.0' == split[0]) ? container.getNetworkPublicAddress() : split[0],
+                    address : ('0.0.0.0' == split[0]) ? container.env.getNetworkExternal().address : split[0],
                     port : split[1]
                 },
                 {
-                    environment : that.cruntime.get('name.environment'),
-                    service : that.cruntime.get('name.service'),
-                    role : that.cruntime.get('name.role'),
-                    attributes : that.cruntime.get('attributes')
+                    environment : that.ccontainer.get('name.environment'),
+                    service : that.ccontainer.get('name.service'),
+                    role : that.ccontainer.get('name.role'),
+                    attributes : that.ccontainer.get('attributes')
                 }
             );
 

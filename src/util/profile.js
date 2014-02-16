@@ -1,4 +1,5 @@
 var crypto = require('crypto');
+var fs = require('fs');
 
 var Config = require('./config');
 var Workflow = require('./workflow');
@@ -11,14 +12,122 @@ function Profile (cruntime, ccompiled, logger) {
     this.logger = logger;
 
     this.names = null;
+    this.imageConfig = null;
     this.imageEngine = null;
     this.imageSource = null;
-    this.imageRuntimeProvide = {};
-    this.imageRuntimeRequire = {};
-    this.imageRuntimeVolume = {};
 }
 
 // --
+
+Profile.prototype.createContainer = function (callback) {
+    var mtype = require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container');
+    var engine = this.getImageEngine();
+
+    engine.generateId(
+        function (error, result) {
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            var container = new mtype(
+                result,
+                new Config(this.ccompiled.get('image')),
+                new Config(this.ccompiled.get('container')),
+                this.logger
+            );
+
+            callback(null, container);
+        }.bind(this)
+    );
+}
+
+Profile.prototype.createTemporaryDirectory = function (callback) {
+    var p = '/tmp/scs-' + this.ccompiled.get('compiled.id.hash');
+
+    if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, '0700');
+    }
+
+    callback(null, p);
+}
+
+Profile.prototype.build = function (callback) {
+    var workflow = new Workflow(this, this.logger, 'build');
+
+    workflow.pushStep(
+        'check',
+        function (workflow, callback1) {
+            this.getImageEngine().hasImage(
+                function (error, exists) {
+                    if (!exists) {
+                        workflow.unshiftStep(
+                            'rebuild',
+                            function (workflow, callback2) {
+                                this.rebuild(callback2);
+                            }
+                        )
+                    }
+
+                    callback1();
+                }
+            );
+        }
+    );
+
+    workflow.run(callback);
+}
+
+Profile.prototype.rebuild = function (callback) {
+    var workflow = new Workflow(this, this.logger, 'rebuild');
+    var tmpdir;
+
+    workflow.pushStep(
+        'tmpdir',
+        function (workflow, callback1) {
+            this.createTemporaryDirectory(
+                function (error, result) {
+                    tmpdir = result;
+
+                    callback1(error, result);
+                }
+            );
+        }
+    );
+
+    workflow.pushStep(
+        'source',
+        function (workflow, callback1) {
+            this.getImageSource().createWorkingDirectory(
+                tmpdir,
+                callback1
+            );
+        }
+    );
+
+    workflow.pushStep(
+        'config',
+        function (workflow, callback1) {
+            this.getImageConfig().build(
+                tmpdir,
+                callback1
+            );
+        }
+    );
+
+    workflow.pushStep(
+        'engine',
+        function (workflow, callback1) {
+            this.getImageEngine().build(
+                tmpdir,
+                callback1
+            );
+        }
+    );
+
+    workflow.run(callback);
+}
 
 Profile.prototype.recompile = function (callback) {
     this.ccompiled = new Config();
@@ -30,8 +139,31 @@ Profile.prototype.recompile = function (callback) {
     workflow.pushStep('image/id', recompileImageUid);
     workflow.pushStep('container', recompileContainer);
     workflow.pushStep('compiled/id', recompileCompiledUid);
+
     workflow.run(callback);
 };
+
+Profile.prototype.compile = function (callback) {
+    var workflow = new Workflow(this, this.logger, 'compile');
+
+    workflow.pushStep(
+        'check',
+        function (workflow, callback1) {
+            if (!this.isCompiled()) {
+                workflow.unshiftStep(
+                    'recompile',
+                    function (workflow, callback2) {
+                        this.recompile(callback2);
+                    }
+                );
+            }
+
+            callback1();
+        }
+    );
+
+    workflow.run(callback);
+}
 
 function recompileImageUid (workflow, callback) {
     var hash, data;
@@ -56,7 +188,7 @@ function recompileImageUid (workflow, callback) {
     data = this.ccompiled.getFlattenedPairs('image.runtime', {})
     data.sort();
     hash.update(data.join('\n'));
-    uidhash.update('runtime: ' + hash.digest('hex') + '\n');
+    uidhash.update('dependency: ' + hash.digest('hex') + '\n');
 
     hash = crypto.createHash('sha1');
     data = this.ccompiled.getFlattenedPairs('image.source', {})
@@ -68,6 +200,10 @@ function recompileImageUid (workflow, callback) {
 
     callback();
 };
+
+Profile.prototype.isCompiled = function () {
+    return this.ccompiled.has('compiled.id.hash');
+}
 
 Profile.prototype.needsRecompilation = function () {
     return this.ccompiled.get('compiled.id.hash', null) != this.recalculateCompiledUid();
@@ -94,7 +230,7 @@ Profile.prototype.recalculateCompiledUid = function () {
     data = this.cruntime.getFlattenedPairs('image.runtime', {})
     data.sort();
     hash.update(data.join('\n'));
-    uidhash.update('runtime: ' + hash.digest('hex') + '\n');
+    uidhash.update('dependency: ' + hash.digest('hex') + '\n');
 
     hash = crypto.createHash('sha1');
     data = this.cruntime.getFlattenedPairs('image.source', {})
@@ -187,15 +323,15 @@ function recompileImageManifest (workflow, callback) {
             this.ccompiled.set('image.config._method', configMethod);
 
 
-            this.ccompiled.set('image.runtime.provide', null);
+            this.ccompiled.set('image.dependency.provide', null);
 
-            var provideMap = cimage.get('runtime.provide', {});
+            var provideMap = cimage.get('dependency.provide', {});
 
             Object.keys(provideMap).forEach(
                 function (key) {
                     this.ccompiled.set(
-                        'image.runtime.provide.' + key,
-                        require('../image/runtime/provide/compiler').compileImageConfig(
+                        'image.dependency.provide.' + key,
+                        require('../image/dependency/provide/compiler').compileImageConfig(
                             key,
                             [ provideMap[key] ]
                         )
@@ -204,15 +340,15 @@ function recompileImageManifest (workflow, callback) {
             );
 
 
-            this.ccompiled.set('image.runtime.require', null);
+            this.ccompiled.set('image.dependency.require', null);
 
-            var requireMap = cimage.get('runtime.require', {});
+            var requireMap = cimage.get('dependency.require', {});
 
             Object.keys(requireMap).forEach(
                 function (key) {
                     this.ccompiled.set(
-                        'image.runtime.require.' + key,
-                        require('../image/runtime/require/compiler').compileImageConfig(
+                        'image.dependency.require.' + key,
+                        require('../image/dependency/require/compiler').compileImageConfig(
                             key,
                             [ requireMap[key] ]
                         )
@@ -221,15 +357,15 @@ function recompileImageManifest (workflow, callback) {
             );
 
 
-            this.ccompiled.set('image.runtime.volume', null);
+            this.ccompiled.set('image.dependency.volume', null);
 
-            var volumeMap = cimage.get('runtime.volume', {});
+            var volumeMap = cimage.get('dependency.volume', {});
 
             Object.keys(volumeMap).forEach(
                 function (key) {
                     this.ccompiled.set(
-                        'image.runtime.volume.' + key,
-                        require('../image/runtime/volume/compiler').compileImageConfig(
+                        'image.dependency.volume.' + key,
+                        require('../image/dependency/volume/compiler').compileImageConfig(
                             key,
                             [ volumeMap[key] ]
                         )
@@ -259,67 +395,84 @@ function recompileContainer (workflow, callback) {
     this.ccompiled.set('container.name.role', this.cruntime.get('container.name.role'));
 
 
-    this.ccompiled.set('container.runtime.provide', null);
+    this.ccompiled.set('container.dependency.provide', null);
 
-    var provideMap = this.cruntime.get('container.runtime.provide', {});
+    var provideMap = this.cruntime.get('container.dependency.provide', {});
 
     Object.keys(provideMap).forEach(
         function (key) {
             this.ccompiled.set(
-                'container.runtime.provide.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/provide/' + provideMap[key].method + '/compiler').compileContainerConfig(
+                'container.dependency.provide.' + key,
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/provide/' + provideMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [ 'options' in provideMap[key] ? provideMap[key].options : {} ]
                 )
             );
 
-            this.ccompiled.set('container.runtime.provide.' + key + '.method', null);
-            this.ccompiled.set('container.runtime.provide.' + key + '._method', provideMap[key].method);
+            this.ccompiled.set('container.dependency.provide.' + key + '.method', null);
+            this.ccompiled.set('container.dependency.provide.' + key + '._method', provideMap[key].method);
         }.bind(this)
     );
 
 
-    this.ccompiled.set('container.runtime.require', null);
+    this.ccompiled.set('container.dependency.require', null);
 
-    var requireMap = this.cruntime.get('container.runtime.require', {});
+    var requireMap = this.cruntime.get('container.dependency.require', {});
 
     Object.keys(requireMap).forEach(
         function (key) {
             this.ccompiled.set(
-                'container.runtime.require.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/require/' + provideMap[key].method + '/compiler').compileContainerConfig(
+                'container.dependency.require.' + key,
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/require/' + provideMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [ 'options' in requireMap[key] ? requireMap[key].options : {} ]
                 )
             );
 
-            this.ccompiled.set('container.runtime.require.' + key + '.method', null);
-            this.ccompiled.set('container.runtime.require.' + key + '._method', requireMap[key].method);
+            this.ccompiled.set('container.dependency.require.' + key + '.method', null);
+            this.ccompiled.set('container.dependency.require.' + key + '._method', requireMap[key].method);
         }.bind(this)
     );
 
 
-    this.ccompiled.set('container.runtime.volume', null);
+    this.ccompiled.set('container.dependency.volume', null);
 
-    var volumeMap = this.cruntime.get('container.runtime.volume', {});
+    var volumeMap = this.cruntime.get('container.dependency.volume', {});
 
     Object.keys(volumeMap).forEach(
         function (key) {
             this.ccompiled.set(
-                'container.runtime.volume.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/volume/' + volumeMap[key].method + '/compiler').compileContainerConfig(
+                'container.dependency.volume.' + key,
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/volume/' + volumeMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [ 'options' in volumeMap[key] ? volumeMap[key].options : {} ]
                 )
             );
 
-            this.ccompiled.set('container.runtime.volume.' + key + '.method', null);
-            this.ccompiled.set('container.runtime.volume.' + key + '._method', volumeMap[key].method);
+            this.ccompiled.set('container.dependency.volume.' + key + '.method', null);
+            this.ccompiled.set('container.dependency.volume.' + key + '._method', volumeMap[key].method);
         }.bind(this)
     );
+
+
+    this.ccompiled.set('container.network', null);
+
+    var networkMethod = this.cruntime.get('container.network.method', 'default');
+
+    this.ccompiled.set(
+        'container.network',
+        require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/network/' + networkMethod + '/compiler').compileContainerConfig(
+            this.getContainerNames(),
+            [
+                this.cruntime.get('container.network.options', {})
+            ]
+        )
+    );
+
+    this.ccompiled.set('container.network._method', networkMethod);
 
     callback();
 }
@@ -337,7 +490,7 @@ function recompileImageSource (workflow, callback) {
 
     this.ccompiled.set(
         'image.source',
-        require('../image/source/' + sourceMethod + '/compiler').compileRuntimeConfig(
+        require('../image/source/' + sourceMethod + '/compiler').compileImageConfig(
             [ sourceConfig.config ]
         )
     );
@@ -373,12 +526,25 @@ Profile.prototype.getContainerNames = function () {
     return this.names;
 }
 
+Profile.prototype.getImageConfig = function () {
+    if (null === this.imageConfig) {
+        var mtype = require('../image/config/' + this.ccompiled.get('image.config._method'));
+
+        this.imageConfig = new mtype(
+            new Config(this.ccompiled.get('image')),
+            this.logger
+        );
+    }
+
+    return this.imageConfig;
+}
+
 Profile.prototype.getImageEngine = function () {
     if (null === this.imageEngine) {
         var mtype = require('../image/engine/' + this.ccompiled.get('image.engine._method'));
 
         this.imageEngine = new mtype(
-            new Config(this.ccompiled.get('image.engine')),
+            new Config(this.ccompiled.get('image')),
             this.logger
         );
     }
@@ -399,17 +565,6 @@ Profile.prototype.getImageSource = function () {
     return this.imageSource;
 }
 
-Profile.prototype.getRuntimeProvide = function (key) {
-    if (null === this.imageSource) {
-        var mtype = require('../image/source/' + this.ccompiled.get('image.source._method'));
-
-        this.imageSource = new mtype(
-            new Config(this.ccompiled.get('image.source')),
-            this.logger
-        );
-    }
-
-    return this.imageSource;
-}
+// --
 
 module.exports = Profile;

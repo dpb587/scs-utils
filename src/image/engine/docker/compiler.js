@@ -8,6 +8,8 @@ module.exports.compileImageConfig = function (configs) {
     var cimage = new Config();
 
     cimage.set('from', 'ubuntu:precise');
+    cimage.set('build_patch.pre', []);
+    cimage.set('build_patch.post', []);
 
     configs.forEach(function (config) {
         cimage.importObject(config);
@@ -19,9 +21,6 @@ module.exports.compileImageConfig = function (configs) {
 
 module.exports.compileContainerConfig = function (names, configs) {
     var cruntime = new Config();
-
-    cruntime.set('build_patch.pre', []);
-    cruntime.set('build_patch.post', []);
 
     configs.forEach(function (config) {
         cruntime.importObject(config);

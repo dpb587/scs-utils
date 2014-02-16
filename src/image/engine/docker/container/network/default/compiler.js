@@ -4,7 +4,7 @@ var Config = require('../../../../../../util/config');
 
 module.exports = {};
 
-module.exports.compileContainerConfig = function (names, id, configs) {
+module.exports.compileContainerConfig = function (names, configs) {
     var cruntime = new Config();
 
     configs.forEach(function (config) {
