@@ -465,7 +465,7 @@ function recompileContainer (workflow, callback) {
                     key,
                     [
                         this.ccompiled.get('global.container.dependency.require.' + method, {}),
-                        'options' in provideMap[key] ? provideMap[key].options : {}
+                        'options' in requireMap[key] ? requireMap[key].options : {}
                     ]
                 )
             );
