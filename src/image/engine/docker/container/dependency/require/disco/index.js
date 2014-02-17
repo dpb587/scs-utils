@@ -25,7 +25,7 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
     var disco = this.getDiscoClient(container);
 
     this.discoId = disco.addRequirement(
-        this.id,
+        that.ccontainer.get('name.endpoint'),
         {
             environment : this.ccontainer.get('name.environment'),
             service : this.ccontainer.get('name.service'),

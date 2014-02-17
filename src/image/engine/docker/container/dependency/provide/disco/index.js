@@ -49,7 +49,7 @@ Provision.prototype.onContainerStarted = function (steps, callback, container) {
             var split = stdout.trim().split(':');
 
             that.discoId = that.getDiscoClient(container).addProvision(
-                that.id,
+                that.ccontainer.get('name.endpoint'),
                 {
                     address : ('0.0.0.0' == split[0]) ? container.env.getNetworkExternal().address : split[0],
                     port : split[1]

@@ -3,13 +3,13 @@
 var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco registry client.' });
 
 cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
-cli.addArgument([ '--server' ], { help : 'disco server', defaultValue : '127.0.0.1:4001', metavar : 'HOST[:PORT]' });
-cli.addArgument([ '--forward' ], { help : 'forward a provisioned endpoint', action : 'append', required : true, metavar : 'ROLE:ENDPOINT:LOCALPORT' });
-cli.addArgument([ '--host' ], { help : 'local hostname' });
-cli.addArgument([ 'envname' ], { help : 'environment name' });
-cli.addArgument([ 'servicename' ], { help : 'service name' });
-cli.addArgument([ 'ip' ], { help : 'ip address to bind to' });
-cli.addArgument([ 'host' ], { help : 'hostname to alias the ip', nargs : '?' });
+cli.addArgument([ '--disco-server' ], { help : 'disco server', defaultValue : '127.0.0.1:9640', metavar : 'HOST[:PORT]' });
+cli.addArgument([ '--forward' ], { help : 'forward a port to an endpoint', action : 'append', required : true, metavar : 'PORT:ENDPOINT[:ROLE][:SERVICE][:ENV]' });
+cli.addArgument([ '--host' ], { help : 'local hostname', defaultValue : 'localhost' });
+cli.addArgument([ '--ip' ], { help : 'ip address to bind to', defaultValue : '0.0.0.0' });
+cli.addArgument([ 'envname' ], { help : 'environment name', nargs : '?', defaultValue : 'default' });
+cli.addArgument([ 'servicename' ], { help : 'service name', nargs : '?', defaultValue : 'default' });
+cli.addArgument([ 'rolename' ], { help : 'role name', nargs : '?', defaultValue : 'default' });
 
 var cliargs = cli.parseArgs();
 
@@ -20,8 +20,7 @@ logger.level = cliargs.log_level;
 
 logger.silly('process/args', JSON.stringify(cliargs));
 
-cliargs.server = cliargs.server.split(':');
-cliargs.host = cliargs.host ? cliargs.host : cliargs.servicename + '.' + cliargs.envname;
+cliargs.disco_server = cliargs.disco_server.split(':');
 
 logger.silly('process/args', JSON.stringify(cliargs));
 
@@ -35,8 +34,8 @@ var net = require('net');
 var client = new (require('../src/disco/service/tcp/client/service'))(
     {
         server : {
-            address : 0 in cliargs.server ? cliargs.server[0] : '127.0.0.1',
-            port : 1 in cliargs.server ? cliargs.server[1] : '9640'
+            address : 0 in cliargs.disco_server ? cliargs.disco_server[0] : '127.0.0.1',
+            port : 1 in cliargs.disco_server ? cliargs.disco_server[1] : '9640'
         }
     },
     logger
@@ -50,14 +49,21 @@ function registerForwarders() {
         function (forward) {
             var forwardz = forward.split(':');
 
+            if (3 > forwardz.length) forwardz.push(cliargs.rolename);
+            if (4 > forwardz.length) forwardz.push(cliargs.servicename);
+            if (5 > forwardz.length) forwardz.push(cliargs.envname);
+
+            var forwardn = forwardz.slice(1).reverse();
+            forwardn = forwardn.join('/');
+
             allEndpoints[forward] = null;
 
             client.addRequirement(
                 forwardz[1],
                 {
-                    environment : cliargs.envname,
-                    service : cliargs.servicename,
-                    role : forwardz[0]
+                    environment : forwardz[4],
+                    service : forwardz[3],
+                    role : forwardz[2]
                 },
                 function (action, endpoints, callback) {
                     if ('initial' == action) {
@@ -88,7 +94,7 @@ function registerForwarders() {
             proxies[forward] = net.createServer(
                 function (from) {
                     if (0 == allEndpoints[forward].length) {
-                        logger.error(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'no endpoint available');
+                        logger.error(forwardn + '/' + from.remoteAddress + ':' + from.remotePort, 'no available endpoint; connection closed');
 
                         from.end();
 
@@ -97,7 +103,7 @@ function registerForwarders() {
 
                     var endpoint = allEndpoints[forward][0];
 
-                    logger.verbose(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'connection ' + from.remoteAddress + ':' + from.remotePort + ' -> ' + endpoint.address.address + ':' + endpoint.address.port);
+                    logger.verbose(forwardn + '/' + from.remoteAddress + ':' + from.remotePort, 'forwarded to ' + endpoint.address.address + ':' + endpoint.address.port);
 
                     var to = net.createConnection(
                         {
@@ -108,7 +114,7 @@ function registerForwarders() {
                         .on(
                             'error',
                             function (err) {
-                                logger.error(forwardz[0] + '/' + forwardz[1] + '/forwarder', err.message);
+                                logger.error(forwardn + '/' + from.remoteAddress + ':' + from.remotePort, err.message);
                             }
                         )
                     ;
@@ -117,17 +123,17 @@ function registerForwarders() {
                     to.pipe(from);
                 }
             )
-                .listen(parseInt(forwardz[2], 10), cliargs.ip)
+                .listen(parseInt(forwardz[0], 10), cliargs.ip)
                 .on(
                     'listening',
                     function () {
-                        logger.info(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'started');
+                        logger.info(forwardn, 'started');
                     }
                 )
                 .on(
                     'close',
                     function () {
-                        logger.info(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'stopped');
+                        logger.info(forwardn, 'stopped');
                     }
                 )
                 ;
@@ -135,34 +141,44 @@ function registerForwarders() {
     );
 }
 
-var cmd;
+client.start();
 
-if (cliargs.host && ('-' != cliargs.host)) {
-    cmd = '/sbin/ifconfig lo0 alias ' + cliargs.ip + ' && (/usr/bin/grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || /bin/echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)';   
-} else {
-    cmd = '/sbin/ifconfig lo0 alias ' + cliargs.ip;
+// --
+
+var cmd = [];
+
+if ('0.0.0.0' != cliargs.ip) {
+    cmd.push('ifconfig lo0 alias ' + cliargs.ip);
 }
 
-logger.silly('localhost/exec', cmd);
+if ('localhost' != cliargs.host) {
+    cmd.push('(grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)');
+}
 
-child_process.exec(
-    cmd,
-    function (error, stdout, stderr) {
-        logger.silly('localhost/stdout', stdout);
-        logger.silly('localhost/stderr', stderr);
-        logger.silly('localhost/code', error ? error.code : 0);
+if (0 < cmd.length) {
+    cmd = cmd.join(' && ');
 
-        if (error) {
-            throw new Error('Unable to route');
+    logger.silly('localhost/exec', cmd);
+
+    child_process.exec(
+        cmd,
+        function (error, stdout, stderr) {
+            logger.silly('localhost/stdout', stdout);
+            logger.silly('localhost/stderr', stderr);
+            logger.silly('localhost/code', error ? error.code : 0);
+
+            if (error) {
+                throw new Error('Unable to route');
+            }
+
+            logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
+
+            registerForwarders();
         }
-
-        logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
-
-        registerForwarders();
-    }
-);
-
-client.start();
+    );
+} else {
+    registerForwarders();
+}
 
 // --
 
