@@ -14,7 +14,6 @@ function Socket(service, raw, context, options, logger) {
     this.service = service;
 
     this.raw = raw;
-    console.log(raw.remotePort);
 
     this.createdAt = new Date();
 

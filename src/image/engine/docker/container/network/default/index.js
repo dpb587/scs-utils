@@ -9,7 +9,7 @@ function Network (cruntime, logger) {
 
 Network.prototype.onContainerLoad = function (steps, callback, container) {
     child_process.exec(
-        'hostname -I | awk \'{ print $1 }\'',
+        'ip -f inet -o addr show dev ' + this.cruntime.get('interface') + ' | sed -r \'s/.*inet\\s+([^\\/]+).*/\\1/\'',
         function (error, stdout, stderr) {
             if (error) {
                 callback(error);
