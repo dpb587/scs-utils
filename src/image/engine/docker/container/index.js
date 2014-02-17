@@ -70,6 +70,7 @@ Container.prototype.engineStart = function (callback) {
         }
     );
 
+    args.push('--name', 'scs-' + this.ccontainer.get('name.local') + '--' + this.id);
     args.push('-cidfile', '/tmp/scs-' + this.id + '.cid');
     args.push('scs-' + this.cimage.get('id.uid'));
 
