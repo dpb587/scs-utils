@@ -135,6 +135,7 @@ Profile.prototype.recompile = function (callback) {
     this.ccompiled = new Config();
 
     var workflow = new Workflow(this, this.logger, 'recompile');
+    workflow.pushStep('global', recompileGlobal);
     workflow.pushStep('image/source', recompileImageSource);
     workflow.pushStep('image/cache', recompileImageCache);
     workflow.pushStep('image', recompileImageManifest);
@@ -249,6 +250,12 @@ function recompileCompiledUid (workflow, callback) {
     callback();
 };
 
+function recompileGlobal (workflow, callback) {
+    this.ccompiled.set('global', this.cruntime.get('global', {}));
+
+    callback();
+}
+
 function recompileImageCache (workflow, callback) {
     this.ccompiled.set('image.cache', null);
 
@@ -291,6 +298,7 @@ function recompileImageManifest (workflow, callback) {
                 'image.engine',
                 require('../image/engine/' + engineMethod + '/compiler').compileImageConfig(
                     [
+                        this.ccompiled.get('global.image.engine.' + engineMethod, {}),
                         cimage.get('engine.' + engineMethod),
                         this.cruntime.get('image.engine.options', {})
                     ]
@@ -312,6 +320,7 @@ function recompileImageManifest (workflow, callback) {
                 'image.config',
                 require('../image/config/' + configMethod + '/compiler').compileImageConfig(
                     [
+                        this.ccompiled.get('global.image.config', {}),
                         cimage.get('config.options', {}),
                         this.cruntime.get('image.config', {})
                     ]
@@ -331,7 +340,10 @@ function recompileImageManifest (workflow, callback) {
                         'image.dependency.provide.' + key,
                         require('../image/dependency/provide/compiler').compileImageConfig(
                             key,
-                            [ provideMap[key] ]
+                            [
+                                this.ccompiled.get('global.image.dependency.provide._default', {}),
+                                provideMap[key]
+                            ]
                         )
                     );
                 }.bind(this)
@@ -348,7 +360,10 @@ function recompileImageManifest (workflow, callback) {
                         'image.dependency.require.' + key,
                         require('../image/dependency/require/compiler').compileImageConfig(
                             key,
-                            [ requireMap[key] ]
+                            [
+                                this.ccompiled.get('global.image.dependency.require._default', {}),
+                                requireMap[key]
+                            ]
                         )
                     );
                 }.bind(this)
@@ -365,7 +380,10 @@ function recompileImageManifest (workflow, callback) {
                         'image.dependency.volume.' + key,
                         require('../image/dependency/volume/compiler').compileImageConfig(
                             key,
-                            [ volumeMap[key] ]
+                            [
+                                this.ccompiled.get('global.image.volume._default', {}),
+                                volumeMap[key]
+                            ]
                         )
                     );
                 }.bind(this)
@@ -406,17 +424,25 @@ function recompileContainer (workflow, callback) {
 
     Object.keys(provideMap).forEach(
         function (key) {
+            var method = 'method' in provideMap[key]
+                ? provideMap[key].method
+                : this.ccompiled.get('global.container.dependency.provide._default._method', {})
+                ;
+
             this.ccompiled.set(
                 'container.dependency.provide.' + key,
                 require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/provide/' + provideMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
-                    [ 'options' in provideMap[key] ? provideMap[key].options : {} ]
+                    [
+                        this.ccompiled.get('global.container.dependency.provide.' + method, {}),
+                        'options' in provideMap[key] ? provideMap[key].options : {}
+                    ]
                 )
             );
 
             this.ccompiled.set('container.dependency.provide.' + key + '.method', null);
-            this.ccompiled.set('container.dependency.provide.' + key + '._method', provideMap[key].method);
+            this.ccompiled.set('container.dependency.provide.' + key + '._method', method);
         }.bind(this)
     );
 
@@ -427,17 +453,25 @@ function recompileContainer (workflow, callback) {
 
     Object.keys(requireMap).forEach(
         function (key) {
+            var method = 'method' in requireMap[key]
+                ? requireMap[key].method
+                : this.ccompiled.get('global.container.dependency.require._default._method')
+                ;
+
             this.ccompiled.set(
                 'container.dependency.require.' + key,
                 require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/require/' + requireMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
-                    [ 'options' in requireMap[key] ? requireMap[key].options : {} ]
+                    [
+                        this.ccompiled.get('global.container.dependency.require.' + method, {}),
+                        'options' in provideMap[key] ? provideMap[key].options : {}
+                    ]
                 )
             );
 
             this.ccompiled.set('container.dependency.require.' + key + '.method', null);
-            this.ccompiled.set('container.dependency.require.' + key + '._method', requireMap[key].method);
+            this.ccompiled.set('container.dependency.require.' + key + '._method', method);
         }.bind(this)
     );
 
@@ -448,17 +482,25 @@ function recompileContainer (workflow, callback) {
 
     Object.keys(volumeMap).forEach(
         function (key) {
+            var method = 'method' in volumeMap[key]
+                ? volumeMap[key].method
+                : this.ccompiled.get('global.container.volume._default._method')
+                ;
+
             this.ccompiled.set(
                 'container.dependency.volume.' + key,
                 require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/volume/' + volumeMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
-                    [ 'options' in volumeMap[key] ? volumeMap[key].options : {} ]
+                    [
+                        this.ccompiled.get('global.container.volume.' + method, {}),
+                        'options' in volumeMap[key] ? volumeMap[key].options : {}
+                    ]
                 )
             );
 
             this.ccompiled.set('container.dependency.volume.' + key + '.method', null);
-            this.ccompiled.set('container.dependency.volume.' + key + '._method', volumeMap[key].method);
+            this.ccompiled.set('container.dependency.volume.' + key + '._method', method);
         }.bind(this)
     );
 
