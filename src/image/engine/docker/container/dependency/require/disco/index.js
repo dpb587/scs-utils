@@ -55,7 +55,7 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
 
                 that.discoState = that.discoState.filter(
                     function (r) {
-                        return -1 < dropids.indexOf(r.id);
+                        return -1 == dropids.indexOf(r.id);
                     }
                 );
             }

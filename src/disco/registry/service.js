@@ -155,11 +155,13 @@ Service.prototype.sendNewProvisionToRequirements = function (pid, phandle) {
             {
                 id : rid,
                 action : 'add',
-                provision : {
-                    id : pid,
-                    address : phandle.address,
-                    attributes : phandle.attributes
-                }
+                endpoints : [
+                    {
+                        id : pid,
+                        address : phandle.address,
+                        attributes : phandle.attributes
+                    }
+                ]
             },
             function (error, result) {
                 if (error) {
@@ -229,11 +231,13 @@ Service.prototype.dropProvision = function (pid, callback) {
                 {
                     id : rid,
                     action : 'drop',
-                    provision : {
-                        id : pid,
-                        address : phandle.address,
-                        attributes : phandle.attributes
-                    }
+                    endpoints : [
+                        {
+                            id : pid,
+                            address : phandle.address,
+                            attributes : phandle.attributes
+                        }
+                    ]
                 },
                 function () {
                     ackrem -= 1;

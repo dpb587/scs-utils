@@ -14,7 +14,7 @@ module.exports = {
                 ' * drop - an existing provision has been or is being dropped'
             ].join('\n')
         },
-        provision : {
+        endpoints : {
             type : 'object',
             title : 'Provisioning details'
         }
@@ -44,7 +44,7 @@ module.exports = {
 
                 rdat.callback(
                     args.action,
-                    [ args.provision ],
+                    args.endpoints,
                     function () {
                         respond(null, { ack : true });
                     }

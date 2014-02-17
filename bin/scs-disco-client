@@ -76,7 +76,7 @@ function registerForwarders() {
 
                         allEndpoints[forward] = allEndpoints[forward].filter(
                             function (r) {
-                                return -1 < dropids.indexOf(r.id);
+                                return -1 == dropids.indexOf(r.id);
                             }
                         );
                     }
