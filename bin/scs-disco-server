@@ -3,7 +3,7 @@
 var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco registry server.' });
 
 cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
-cli.addArgument([ '--server' ], { help : 'disco server', defaultValue : '127.0.0.1:4001', metavar : 'HOST[:PORT]' });
+cli.addArgument([ 'server' ], { help : 'disco server', defaultValue : '127.0.0.1:4001', metavar : 'HOST[:PORT]' });
 
 var cliargs = cli.parseArgs();
 

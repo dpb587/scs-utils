@@ -81,6 +81,13 @@ var workflow = new Workflow(process, logger, 'cli');
 switch (cliargs.command) {
     case 'build':
         workflow.pushStep(
+            'compile',
+            function (workflow, callback) {
+                profile.compile(callback);
+            }
+        );
+
+        workflow.pushStep(
             'build',
             function (workflow, callback) {
                 profile.build(callback);

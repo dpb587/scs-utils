@@ -118,6 +118,8 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
                 liveupdate.on(
                     'close',
                     function (code) {
+                        callback1();
+
                         that.logger.silly(
                             'container/dependency/require/' + that.id + '/liveupdate/exit',
                             code
@@ -138,8 +140,6 @@ Requirement.prototype.onContainerLoad = function (steps, callback, container) {
                             'container/dependency/require/' + that.id + '/liveupdate',
                             'success'
                         );
-
-                        callback1();
                     }
                 );
             } else {
