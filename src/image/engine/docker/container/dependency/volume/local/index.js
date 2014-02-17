@@ -1,5 +1,6 @@
 var child_process = require('child_process');
 var fs = require('fs');
+var utilfs = require('../../../../../../../util/fs');
 
 // --
 
@@ -16,7 +17,7 @@ Volume.prototype.onContainerLoad = function (steps, callback, container) {
             throw new Error('The path "' + this.cruntime.get('path') + '" does not exist.');
         }
 
-        fs.mkdirSync(this.cruntime.get('path'), this.cruntime.get('mode'));
+        utilfs.mkdirRecursiveSync(this.cruntime.get('path'), this.cruntime.get('mode'));
     }
 
     container.env.setVolume(this.id, this.cruntime.get('path'));

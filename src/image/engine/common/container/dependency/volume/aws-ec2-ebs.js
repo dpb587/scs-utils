@@ -5,6 +5,8 @@ var path = require('path');
 
 var AWS = require('aws-sdk');
 
+var utilfs = require('../../../../../../util/fs');
+
 // --
 
 var devicemap = {
@@ -133,7 +135,7 @@ workflow_load.mount_path = function (workflow, callback) {
 
             var p = that.ccontainer.get('mount.path');
 
-            recursiveMkdir(p);
+            utilfs.mkdirRecursiveSync(p, 0700);
 
             var cmd = '/bin/mount ' + that.ccontainer.get('mount.device') + ' ' + p;
 
@@ -467,20 +469,6 @@ workflow_load.create_volume = function (workflow, callback) {
 }
 
 // --
-
-function recursiveMkdir(p) {
-    var pa = 'string' == typeof p ? path.normalize(p).split(path.sep) : p;
-
-    if (2 < pa.length) {
-        recursiveMkdir(pa.slice(0, -1));
-    }
-
-    var ps = pa.join(path.sep);
-
-    if (!fs.existsSync(ps)) {
-        fs.mkdirSync(ps, '0700');
-    }
-}
 
 function remapTags(tags) {
     var remap = {};

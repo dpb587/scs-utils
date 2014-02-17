@@ -9,7 +9,7 @@ module.exports.compileContainerConfig = function (names, id, configs) {
 
     ccontainer.set('autocreate', true);
     ccontainer.set('autopurge', false);
-    ccontainer.set('mode', '0700');
+    ccontainer.set('mode', '700');
     ccontainer.set('path', '/var/lib/scs-utils/volume--local--' + names.get('local'));
 
     configs.forEach(function (config) {

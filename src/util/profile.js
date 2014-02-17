@@ -1,8 +1,8 @@
 var crypto = require('crypto');
-var fs = require('fs');
 
 var Config = require('./config');
 var Workflow = require('./workflow');
+var utilfs = require('./fs');
 
 // --
 
@@ -44,11 +44,13 @@ Profile.prototype.createContainer = function (callback) {
 }
 
 Profile.prototype.createTemporaryDirectory = function (callback) {
-    var p = '/tmp/scs-' + this.ccompiled.get('compiled.id.hash');
+    var bp = '/var/lib/scs-utils/tmp';
 
-    if (!fs.existsSync(p)) {
-        fs.mkdirSync(p, '0700');
-    }
+    utilfs.mkdirRecursiveSync(bp, 0700);
+
+    var p = bp + '/scs-' + this.ccompiled.get('compiled.id.hash');
+
+    utilfs.mkdirRecursiveSync(p, 0755);
 
     callback(null, p);
 }
@@ -250,11 +252,7 @@ function recompileCompiledUid (workflow, callback) {
 function recompileImageCache (workflow, callback) {
     this.ccompiled.set('image.cache', null);
 
-    if (!this.cruntime.has('image.cache.method')) {
-        throw new Error('Runtime configuration is missing image.cache.method');
-    }
-
-    var cacheMethod = this.cruntime.get('image.cache.method');
+    var cacheMethod = this.cruntime.get('image.cache.method', 'disabled');
 
     this.ccompiled.set(
         'image.cache',
