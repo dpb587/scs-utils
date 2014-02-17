@@ -5,6 +5,7 @@ var path = require('path');
 var yaml = require('js-yaml');
 
 var Workflow = require('../../../util/workflow');
+var utilfs = require('../../../util/fs');
 
 // --
 
@@ -70,30 +71,62 @@ Source.prototype.recompileCanonicalize = function (callback) {
     );
 }
 
-Source.prototype.reloadImageManifest = function (callback) {
-    if ('file://' == this.cimage.get('uri').substring(0, 7)) {
-        var cmd = this.cimage.get('binary.git') + ' show ' + this.cimage.get('reference') + ':scs/image.yaml';
+Source.prototype.getCacheDirectory = function () {
+    return '/var/lib/scs-utils/image-source/git--' + this.cimage.get('uri').replace(/[^a-z0-9\-_]/g, '-').replace(/\-+/, '-');
+}
 
-        child_process.exec(
-            cmd,
-            {
-                env : {
-                    GIT_DIR : this.cimage.get('uri').substring(7) + '/.git'
-                }
-            },
-            function (error, stdout, stderr) {
+function pullImageManifest(git, reference, git_dir, callback) {
+    var cmd = git + ' show ' + reference + ':scs/image.yaml';
+
+    child_process.exec(
+        cmd,
+        {
+            env : {
+                GIT_DIR : git_dir
+            }
+        },
+        function (error, stdout, stderr) {
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            callback(null, yaml.safeLoad(stdout));
+        }
+    );
+}
+Source.prototype.reloadImageManifest = function (callback) {
+    var that = this;
+
+    if ('file://' == this.cimage.get('uri').substring(0, 7)) {
+        pullImageManifest(
+            this.cimage.get('binary.git'),
+            this.cimage.get('reference'),
+            this.cimage.get('uri').substring(7) + '/.git',
+            callback
+        );
+    } else {
+        var cachedir = this.getCacheDirectory();
+        utilfs.mkdirRecursiveSync(cachedir, 0700);
+
+        this.createWorkingDirectory(
+            cachedir,
+            function (error, result) {
                 if (error) {
                     callback(error);
 
                     return;
                 }
 
-                callback(null, yaml.safeLoad(stdout));
+                pullImageManifest(
+                    that.cimage.get('binary.git'),
+                    that.cimage.get('reference'),
+                    cachedir + '/.git',
+                    callback
+                );
             }
         );
-    } else {
-        // long form
-        callback(new Error('asdf'));
     }
 }
 

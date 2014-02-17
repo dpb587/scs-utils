@@ -8,7 +8,7 @@ function Service(options, logger) {
     var options = options || {};
 
     options.server = options.server || {};
-    options.server.host = 'host' in options.server ? options.server.host : '127.0.0.1';
+    options.server.address = 'address' in options.server ? options.server.address : '127.0.0.1';
     options.server.port = 'port' in options.server ? options.server.port : '9640';
 
     options.join = options.join || {};
@@ -51,7 +51,7 @@ Service.prototype.addProvision = function (endpoint, address, options) {
     var options = options || {};
     options.environment = options.environment || this.options.environment;
     options.service = options.service || this.options.service;
-    options.role = options.roles || this.options.role;
+    options.role = options.role || this.options.role;
 
     that.provisionHandles[lid] = {
         activeLocal : true,
@@ -96,7 +96,7 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
     var options = options || {};
     options.environment = options.environment || this.options.environment;
     options.service = options.service || this.options.service;
-    options.role = options.roles || this.options.role;
+    options.role = options.role || this.options.role;
 
     that.requirementHandles[lid] = {
         callback : callback,
@@ -184,7 +184,7 @@ Service.prototype.reconnect = function () {
     this.socket = new Socket(
         this,
         new net.createConnection({
-            host : this.options.server.host,
+            host : this.options.server.address,
             port : this.options.server.port
         }),
         this,

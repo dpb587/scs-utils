@@ -1,32 +1,179 @@
 #!/usr/bin/env node
 
 var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco registry client.' });
-    cli.addArgument([ '--environment' ], { help : 'environment name', defaultValue : 'default' });
-    cli.addArgument([ '--service' ], { help : 'service name', defaultValue : 'default' });
-    cli.addArgument([ '--role' ], { help : 'role name', defaultValue : 'default' });
-    cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+cli.addArgument([ '--server' ], { help : 'disco server', defaultValue : '127.0.0.1:4001', metavar : 'HOST[:PORT]' });
+cli.addArgument([ '--forward' ], { help : 'forward a provisioned endpoint', action : 'append', required : true, metavar : 'ROLE:ENDPOINT:LOCALPORT' });
+cli.addArgument([ '--host' ], { help : 'local hostname' });
+cli.addArgument([ 'envname' ], { help : 'environment name' });
+cli.addArgument([ 'servicename' ], { help : 'service name' });
+cli.addArgument([ 'ip' ], { help : 'ip address to bind to' });
+cli.addArgument([ 'host' ], { help : 'hostname to alias the ip', nargs : '?' });
+
 var cliargs = cli.parseArgs();
+
+// --
 
 var logger = require('npmlog');
 logger.level = cliargs.log_level;
+
 logger.silly('process/args', JSON.stringify(cliargs));
 
+cliargs.server = cliargs.server.split(':');
+cliargs.host = cliargs.host ? cliargs.host : cliargs.servicename + '.' + cliargs.envname;
 
-var client = new (require('../src/disco/service/tcp/client/service'))(null, logger);
-client.addProvision('mysql', { host : '192.168.181.168', port : 40915 });
-client.addRequirement(
-    'mysql',
-    function (action, endpoints, ack) {
-        logger.info('require/mysql/' + action, JSON.stringify(endpoints, null, 2));
+logger.silly('process/args', JSON.stringify(cliargs));
 
-        ack();
+// --
+
+var child_process = require('child_process');
+var net = require('net');
+
+// --
+
+var client = new (require('../src/disco/service/tcp/client/service'))(
+    {
+        server : {
+            address : 0 in cliargs.server ? cliargs.server[0] : '127.0.0.1',
+            port : 1 in cliargs.server ? cliargs.server[1] : '9640'
+        }
+    },
+    logger
+);
+
+var allEndpoints = {};
+var proxies = [];
+
+function registerForwarders() {
+    cliargs.forward.forEach(
+        function (forward) {
+            var forwardz = forward.split(':');
+
+            allEndpoints[forward] = null;
+
+            client.addRequirement(
+                forwardz[1],
+                {
+                    environment : cliargs.envname,
+                    service : cliargs.servicename,
+                    role : forwardz[0]
+                },
+                function (action, endpoints, callback) {
+                    if ('initial' == action) {
+                        allEndpoints[forward] = endpoints;
+                    } else if ('add' == action) {
+                        allEndpoints[forward].push.apply(
+                            allEndpoints[forward],
+                            endpoints
+                        );
+                    } else if ('drop' == action) {
+                        var dropids = endpoints.map(
+                            function (r) {
+                                return r.id;
+                            }
+                        );
+
+                        allEndpoints = allEndpoints.filter(
+                            function (r) {
+                                return -1 < dropids.indexOf(r.id);
+                            }
+                        );
+                    }
+
+                    callback();
+                }
+            );
+
+            proxies[forward] = net.createServer(
+                function (from) {
+                    if (0 == allEndpoints[forward].length) {
+                        logger.error(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'no endpoint available');
+
+                        from.end();
+
+                        return;
+                    }
+
+                    var endpoint = allEndpoints[forward][0];
+
+                    logger.verbose(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'connection ' + from.remoteAddress + ':' + from.remotePort + ' -> ' + endpoint.address.address + ':' + endpoint.address.port);
+
+                    var to = net.createConnection(
+                        {
+                            host : endpoint.address.address,
+                            port : endpoint.address.port
+                        }
+                    )
+                        .on(
+                            'error',
+                            function (err) {
+                                logger.error(forwardz[0] + '/' + forwardz[1] + '/forwarder', err.message);
+                            }
+                        )
+                    ;
+
+                    from.pipe(to);
+                    to.pipe(from);
+                }
+            )
+                .listen(parseInt(forwardz[2], 10), cliargs.ip)
+                .on(
+                    'listening',
+                    function () {
+                        logger.info(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'started');
+                    }
+                )
+                .on(
+                    'close',
+                    function () {
+                        logger.info(forwardz[0] + '/' + forwardz[1] + '/forwarder', 'stopped');
+                    }
+                )
+                ;
+        }
+    );
+}
+
+var cmd;
+
+if (cliargs.host && ('-' != cliargs.host)) {
+    cmd = '/sbin/ifconfig lo0 alias ' + cliargs.ip + ' && (/usr/bin/grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || /bin/echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)';   
+} else {
+    cmd = '/sbin/ifconfig lo0 alias ' + cliargs.ip;
+}
+
+logger.silly('localhost/exec', cmd);
+
+child_process.exec(
+    cmd,
+    function (error, stdout, stderr) {
+        logger.silly('localhost/stdout', stdout);
+        logger.silly('localhost/stderr', stderr);
+        logger.silly('localhost/code', error ? error.code : 0);
+
+        if (error) {
+            throw new Error('Unable to route');
+        }
+
+        logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
+
+        registerForwarders();
     }
 );
+
 client.start();
 
+// --
 
-function handleSignal(sig) {
-    logger.info('process/kill', 'received ' + sig);
+function handleSignal(signal) {
+    logger.info('process/kill', signal);
+
+    Object.keys(proxies).forEach(
+        function (key) {
+            proxies[key].close();
+        }
+    );
 
     client.stop();
 }

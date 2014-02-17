@@ -41,7 +41,7 @@ function writePuppetConfigurationStep (workflow, callback, workdir) {
             } else {
                 Object.keys(config[part]).forEach(
                     function (name) {
-                        puppetfile.push('ensure_resource("scs::' + name + '", "' + name + '", parseyaml("' + yaml.safeDump(config[part][name]).replace(/"/g, '\\"') + '"))');
+                        puppetfile.push('ensure_resource("scs::' + part + '", "' + name + '", parseyaml("' + yaml.safeDump(config[part][name]).replace(/"/g, '\\"') + '"))');
                     }
                 );
             }

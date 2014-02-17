@@ -9,14 +9,14 @@ function Service(registry, options, logger) {
     options.heartbeat = options.heartbeat || 15000;
 
     options.listen = options.listen || {};
-    options.listen.host = 'host' in options.listen ? options.listen.host : '127.0.0.1';
+    options.listen.address = 'address' in options.listen ? options.listen.address : '127.0.0.1';
     options.listen.port = 'port' in options.listen ? options.listen.port : '9640';
 
     this.registry = registry;
     this.options = options;
 
     this.logger = logger;
-    this.loggerTopic = 'server/tcp#' + this.options.listen.host + ':' + this.options.listen.port;
+    this.loggerTopic = 'server/tcp#' + this.options.listen.address + ':' + this.options.listen.port;
 
     this.raw = null;
 
@@ -90,7 +90,7 @@ Service.prototype.start = function (callback) {
         'starting...'
     );
 
-    this.raw.listen(this.options.listen.port, this.options.listen.host);
+    this.raw.listen(this.options.listen.port, this.options.listen.address);
 };
 
 Service.prototype.stop = function (callback) {

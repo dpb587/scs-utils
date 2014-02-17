@@ -1,34 +1,51 @@
 #!/usr/bin/env node
 
-
-var cli = new (require('argparse').ArgumentParser)(
-  {
-    description : 'Run a disco registry server.'
-  }
-);
+var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco registry server.' });
 
 cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
+cli.addArgument([ '--server' ], { help : 'disco server', defaultValue : '127.0.0.1:4001', metavar : 'HOST[:PORT]' });
 
 var cliargs = cli.parseArgs();
+
+// --
 
 var logger = require('npmlog');
 logger.level = cliargs.log_level;
 
 logger.silly('process/args', JSON.stringify(cliargs));
 
+cliargs.server = cliargs.server.split(':');
+
+logger.silly('process/args', JSON.stringify(cliargs));
+
+// --
+
 var RegistryService = require('../src/disco/registry/service');
 var TcpService = require('../src/disco/service/tcp/server/service');
 var HttpService = require('../src/disco/http/service');
+
+// --
 
 var context = {};
 
 context.registry = new RegistryService(null, logger);
 
-context.server = new TcpService(context.registry, null, logger);
+context.server = new TcpService(
+    context.registry,
+    {
+        listen : {
+            address : 0 in cliargs.server ? cliargs.server[0] : '127.0.0.1',
+            port : 1 in cliargs.server ? cliargs.server[1] : '9640'
+        }
+    },
+    logger
+);
 context.server.start();
 
 context.http = new HttpService(context, null, logger);
 context.http.start();
+
+// --
 
 function handleSignal(sig) {
     logger.info('process/kill', 'received ' + sig);

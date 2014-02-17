@@ -429,7 +429,7 @@ function recompileContainer (workflow, callback) {
         function (key) {
             this.ccompiled.set(
                 'container.dependency.require.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/require/' + provideMap[key].method + '/compiler').compileContainerConfig(
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/require/' + requireMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [ 'options' in requireMap[key] ? requireMap[key].options : {} ]
