@@ -398,17 +398,9 @@ function recompileImageManifest (workflow, callback) {
 function recompileContainer (workflow, callback) {
     this.ccompiled.set('container.name', null);
 
-    if (!this.cruntime.has('container.name.environment')) {
-        throw new Error('Runtime configuration is missing name.environment');
-    } else if (!this.cruntime.has('container.name.service')) {
-        throw new Error('Runtime configuration is missing name.service');
-    } else if (!this.cruntime.has('container.name.role')) {
-        throw new Error('Runtime configuration is missing name.role');
-    }
-    
-    this.ccompiled.set('container.name.environment', this.cruntime.get('container.name.environment'));
-    this.ccompiled.set('container.name.service', this.cruntime.get('container.name.service'));
-    this.ccompiled.set('container.name.role', this.cruntime.get('container.name.role'));
+    this.ccompiled.set('container.name.environment', this.cruntime.get('container.name.environment', 'default'));
+    this.ccompiled.set('container.name.service', this.cruntime.get('container.name.service', 'default'));
+    this.ccompiled.set('container.name.role', this.cruntime.get('container.name.role', 'default'));
     this.ccompiled.set(
         'container.name.local',
         this.cruntime.get(
