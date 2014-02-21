@@ -551,16 +551,18 @@ describe('disco/registry/service', function () {
                             {
                                 id : rid,
                                 action : 'add',
-                                provision : {
-                                    id : pid,
-                                    address : {
-                                        host : "192.0.2.19",
-                                        port : 30981
-                                    },
-                                    attributes : {
-                                        zone : "one"
+                                endpoints : [
+                                    {
+                                        id : pid,
+                                        address : {
+                                            host : "192.0.2.19",
+                                            port : 30981
+                                        },
+                                        attributes : {
+                                            zone : "one"
+                                        }
                                     }
-                                }
+                                ]
                             }
                         );
                         assert.equal(typeof args[2], 'function');

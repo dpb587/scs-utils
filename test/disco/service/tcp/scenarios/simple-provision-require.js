@@ -122,7 +122,7 @@ describe('disco/service/tcp/scenario/simple-provision-require', function () {
                     // second client added a provision we wanted
                     // now: drop our requirement
                     function (data) {
-                        var match = /c:([^ ]+) requirement.changed {"id":"([^"]+)","action":"add","provision":{"id":"([^"]+)","address":{"host":"192.0.2.38","port":12392},"attributes":{"zone":"one"}}}\n/.exec(data);
+                        var match = /c:([^ ]+) requirement.changed {"id":"([^"]+)","action":"add","endpoints":\[{"id":"([^"]+)","address":{"host":"192.0.2.38","port":12392},"attributes":{"zone":"one"}}\]}\n/.exec(data);
                         if (!match) throw Error('Unexpected response: ' + data);
 
                         first.write('r:' + match[1] + ' {"result":{"ack":true}}\n');
