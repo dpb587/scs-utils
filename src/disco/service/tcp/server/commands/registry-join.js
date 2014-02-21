@@ -8,7 +8,7 @@ module.exports = {
             description : [
                 'Available options are:',
                 ' * attributes (object) - reference attributes about the client',
-                ' * timeout (integer) - enable reconnect timeouts in case of disconnect'
+                ' * timeout (integer) - enable reconnect timeouts in case of disconnect (seconds)'
             ].join('\n')
         }
     },
@@ -17,6 +17,15 @@ module.exports = {
         session.attach(this);
 
         this.setSession(session);
+
+        this.raw.on(
+            'end',
+            function () {
+                if (session.activeLocal) {
+                    session.startDetachTimeout();
+                }
+            }
+        );
 
         respond(null, { id : session.id });
     }

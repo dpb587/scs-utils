@@ -4,6 +4,9 @@ function Session(registry, options, logger) {
     this.id = uuid.v4();
 
     options = options || {};
+    options.attributes = options.attributes || {};
+    options.timeout = options.timeout || 0;
+
     this.options = options;
 
     this.registry = registry;
@@ -15,12 +18,51 @@ function Session(registry, options, logger) {
     this.socketQueue = [];
 
     this.commandCallbacks = {};
+
+    this.detachTimeout = false;
+
+    this.activeLocal = true;
+    this.activeRemote = false;
+}
+
+Session.prototype.startDetachTimeout = function () {
+    var that = this;
+
+    this.detachTimeout = setTimeout(
+        function () {
+            that.logger.verbose(
+                that.loggerTopic + '/timeout',
+                'destroying session'
+            );
+
+            that.registry.destroySession(
+                that.id,
+                function () {
+                    that.logger.info(
+                        that.loggerTopic + '/detach-timeout',
+                        'destroyed session'
+                    );
+                }
+            )
+        },
+        this.options.timeout
+    );
+}
+
+Session.prototype.stopDetachTimeout = function () {
+    clearTimeout(this.detachTimeout);
 }
 
 Session.prototype.attach = function (socket) {
+    if (!this.activeLocal) {
+        throw new Error('Session is no longer active.');
+    }
+
     if (this.isAttached()) {
         this.detach();
     }
+
+    this.stopDetachTimeout();
 
     this.socket = socket;
 
@@ -41,6 +83,8 @@ Session.prototype.detach = function () {
         this.loggerTopic + '/socket',
         'unbound'
     );
+
+    this.startDetachTimeout();
 };
 
 Session.prototype.isAttached = function () {

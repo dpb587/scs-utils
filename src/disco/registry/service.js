@@ -29,6 +29,8 @@ Service.prototype.destroySession = function (id, callback) {
     var that = this;
     var remain = 0;
 
+    this.sessions[id].activeLocal = false;
+
     function finish() {
         if (remain > 0) {
             return;
@@ -40,6 +42,8 @@ Service.prototype.destroySession = function (id, callback) {
     Object.keys(this.provisionHandles).forEach(
         function (pid) {
             if (id != that.provisionHandles[pid].session) {
+                return;
+            } else if (true != that.provisionHandles[pid].activeLocal) {
                 return;
             }
 
@@ -59,6 +63,8 @@ Service.prototype.destroySession = function (id, callback) {
     Object.keys(this.requirementHandles).forEach(
         function (rid) {
             if (id != that.requirementHandles[rid].session) {
+                return;
+            } else if (true != that.requirementHandles[rid].activeLocal) {
                 return;
             }
 

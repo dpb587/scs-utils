@@ -139,6 +139,8 @@ Socket.prototype.resetTimeoutRecv = function () {
 
             that.activeLocal = false;
 
+            clearInterval(that.heartbeatSendHandle);
+
             that.logger.silly(
                 that.loggerTopic + '/heartbeat',
                 'timeout'

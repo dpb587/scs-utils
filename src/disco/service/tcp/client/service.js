@@ -219,14 +219,14 @@ Service.prototype.reconnect = function () {
                     if (error) {
                         that.logger.error('client/session.attach', error);
 
-                        if (('Session is not available.' == error.message) && (true == that.options.join.rejoin)) {
-                            process.nextTick(
-                                function () {
-                                    that.session.id = 'anonymous';
-                                    that.reconnect();
-                                }
-                            );
-                        }
+                        process.nextTick(
+                            function () {
+                                that.session.id = 'anonymous';
+                                that.reconnect();
+                            }
+                        );
+
+                        that.socket.end();
 
                         return;
                     }
