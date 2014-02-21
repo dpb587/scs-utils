@@ -14,6 +14,8 @@ function Service(options, logger) {
     options.join = options.join || {};
     options.join.timeout = 30000;
 
+    options.join.rejoin = 'rejoin' in options.join ? options.join.rejoin : true;
+
     options.environment = options.environment || 'default';
     options.service = options.service || 'default';
     options.role = options.role || 'default';
@@ -44,8 +46,6 @@ function Service(options, logger) {
 }
 
 Service.prototype.addProvision = function (endpoint, address, options) {
-    var that = this;
-
     var lid = uuid.v4();
 
     var options = options || {};
@@ -53,21 +53,30 @@ Service.prototype.addProvision = function (endpoint, address, options) {
     options.service = options.service || this.options.service;
     options.role = options.role || this.options.role;
 
-    that.provisionHandles[lid] = {
+    this.provisionHandles[lid] = {
         activeLocal : true,
-        activeRemote : false
-    };
-
-    this.session.sendCommand(
-        'provision.add',
-        {
+        activeRemote : false,
+        params : {
             environment : options.environment,
             service : options.service,
             role : options.role,
             endpoint : endpoint,
             address : address,
             attributes : options.attributes || null
-        },
+        }
+    };
+
+    this.sendProvision(lid);
+
+    return lid;
+}
+
+Service.prototype.sendProvision = function (lid) {
+    var that = this;
+
+    this.session.sendCommand(
+        'provision.add',
+        this.provisionHandles[lid].params,
         function (error, result) {
             if (null !== error) {
                 that.logger.error('provision', error);
@@ -79,8 +88,6 @@ Service.prototype.addProvision = function (endpoint, address, options) {
             that.provisionHandles[lid].activeRemote = true;
         }
     );
-
-    return lid;
 }
 
 Service.prototype.addRequirement = function (endpoint, options, callback) {
@@ -89,8 +96,6 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
         options = {};
     }
 
-    var that = this;
-
     var lid = uuid.v4();
 
     var options = options || {};
@@ -98,22 +103,31 @@ Service.prototype.addRequirement = function (endpoint, options, callback) {
     options.service = options.service || this.options.service;
     options.role = options.role || this.options.role;
 
-    that.requirementHandles[lid] = {
+    this.requirementHandles[lid] = {
         callback : callback,
         endpoints : null,
         activeLocal : true,
-        activeRemote : false
-    };
-
-    this.session.sendCommand(
-        'requirement.add',
-        {
+        activeRemote : false,
+        params : {
             environment : options.environment,
             service : options.service,
             role : options.role,
             endpoint : endpoint,
             attributes : options.attributes || null
-        },
+        }
+    };
+
+    this.sendRequirement(lid);
+
+    return lid;
+}
+
+Service.prototype.sendRequirement = function (lid) {
+    var that = this;
+
+    this.session.sendCommand(
+        'requirement.add',
+        that.requirementHandles[lid].params,
         function (error, result) {
             if (null !== error) {
                 that.logger.error('requirement', error)
@@ -177,9 +191,9 @@ Service.prototype.reconnect = function () {
 
     if (this.socket) {
         this.socket.end();
-    }
 
-    this.socket = null;
+        return;
+    }
 
     this.socket = new Socket(
         this,
@@ -204,6 +218,15 @@ Service.prototype.reconnect = function () {
                 function (error, result) {
                     if (error) {
                         that.logger.error('client/session.attach', error);
+
+                        if (('Session is not available.' == error.message) && (true == that.options.join.rejoin)) {
+                            process.nextTick(
+                                function () {
+                                    that.session.id = 'anonymous';
+                                    that.reconnect();
+                                }
+                            );
+                        }
 
                         return;
                     }
@@ -233,6 +256,22 @@ Service.prototype.reconnect = function () {
                     that.logger.verbose('client', 'joined new session (' + that.session.id + ')');
 
                     that.activeRemote = true;
+
+                    Object.keys(that.provisionHandles).forEach(
+                        function (lid) {
+                            if (true == that.provisionHandles[lid].activeRemote) {
+                                that.sendProvision(lid);
+                            }
+                        }
+                    );
+
+                    Object.keys(that.requirementHandles).forEach(
+                        function (lid) {
+                            if (true == that.requirementHandles[lid].activeRemote) {
+                                that.sendRequirement(lid);
+                            }
+                        }
+                    );
                 }
             );
         }
@@ -248,6 +287,8 @@ Service.prototype.reconnect = function () {
         );
     });
     this.socket.raw.on('close', function (had_error) {
+        that.socket = null;
+
         if (that.activeLocal) {
             that.logger.silly('client', 'reconnecting in ' + that.reconnectBackoff + ' seconds...');
 
@@ -283,19 +324,58 @@ Service.prototype.stop = function (callback) {
         clearTimeout(this.reconnectTimer);
         this.reconnectBackoff = 0;
 
-        this.logger.silly('client', 'disconnecting...');
+        this.logger.silly('client', 'stopping...');
 
-        if (true == this.activeRemote) {
-            this.session.sendCommand(
-                'registry.leave',
-                null,
-                function () {
-                    that.socket.end();
-                }
-            );
-        } else {
-            this.socket.end();
+        var readyDoneCount = 1;
+
+        function readyDone() {
+            readyDoneCount -= 1;
+
+            if (0 < readyDoneCount) {
+                return;
+            }
+
+            if (true == that.activeRemote) {
+                that.session.sendCommand(
+                    'registry.leave',
+                    null,
+                    function () {
+                        that.socket.end();
+                    }
+                );
+            } else {
+                that.socket.end();
+            }
         }
+
+
+        Object.keys(that.provisionHandles).forEach(
+            function (lid) {
+                if (true == that.provisionHandles[lid].activeRemote) {
+                    readyDoneCount += 1;
+
+                    that.dropProvision(
+                        lid,
+                        readyDone
+                    );
+                }
+            }
+        );
+
+        Object.keys(that.requirementHandles).forEach(
+            function (lid) {
+                if (true == that.requirementHandles[lid].activeRemote) {
+                    readyDoneCount += 1;
+
+                    that.dropRequirement(
+                        lid,
+                        readyDone
+                    );
+                }
+            }
+        );
+
+        readyDone();
     } else {
         this.socket.end();
     }

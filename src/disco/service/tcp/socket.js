@@ -36,16 +36,22 @@ function Socket(service, raw, context, options, logger) {
 
     var dataBuffer = '';
 
-    this.raw.on('close', function () {
+    this.raw.on('end', function () {
         that.logger.verbose(
             that.loggerTopic,
-            'connection closed'
+            'ended'
         );
 
         that.activeRemote = false;
 
         clearInterval(that.heartbeatSendHandle);
         clearTimeout(that.heartbeatRecvHandle);
+    });
+    this.raw.on('close', function () {
+        that.logger.verbose(
+            that.loggerTopic,
+            'closed'
+        );
     });
     this.raw.on('error', function (error) {
         that.logger.error(
@@ -80,11 +86,25 @@ function Socket(service, raw, context, options, logger) {
         }
     });
 
-    if (this.options.heartbeatSend > 0) {
-        this.heartbeatSendHandle = setInterval(
-            this.sendHeartbeat.bind(this),
-            this.options.heartbeatSend
+    function onConnect () {
+        that.logger.silly(
+            that.loggerTopic,
+            'connected'
         );
+
+        if (that.options.heartbeatSend > 0) {
+            that.heartbeatSendHandle = setInterval(
+                that.sendHeartbeat.bind(that),
+                that.options.heartbeatSend
+            );
+        }
+    }
+
+    if (this.raw.remoteAddress) {
+        // already connected
+        onConnect();
+    } else {
+        this.raw.on('connect', onConnect);
     }
 
     this.logger.silly(

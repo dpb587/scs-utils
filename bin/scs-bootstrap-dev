@@ -45,6 +45,8 @@ echo 'deb http://get.docker.io/ubuntu docker main' | tee /etc/apt/sources.list.d
 apt-get update
 apt-get install -y linux-image-extra-`uname -r`
 apt-get install -y lxc-docker
+sed -i 's/DOCKER_OPTS=.*$/DOCKER_OPTS="--restart=false"/' /etc/init/docker.conf
+sed -i 's/^script$/limit nofile 32000 64000\n\nscript/' /etc/init/docker.conf
 
 
 # supervisor
