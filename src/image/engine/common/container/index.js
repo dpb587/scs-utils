@@ -58,6 +58,16 @@ Container.prototype.start = function (callback) {
 
 // --
 
+Container.prototype.onContainerLoad = function (workflow, callback) {
+    callback();
+}
+
+Container.prototype.onContainerUnload = function (workflow, callback) {
+    callback();
+}
+
+// --
+
 Container.prototype.getRuntimeDependencyRequire = function (key) {
     if (!(key in this.runtimeDependencyRequire)) {
         var mtype = require('../../' + this.cimage.get('engine._method') + '/container/dependency/require/' + this.ccontainer.get('dependency.require.' + key + '._method'));

@@ -18,6 +18,38 @@ util.inherits(Container, ContainerBase);
 
 // --
 
+Container.prototype.onContainerLoad = function (workflow, callback) {
+    var that = this;
+
+    if (!fs.existsSync(this.ccontainer.get('engine.cidfile'))) {
+        callback();
+
+        return;
+    }
+
+    child_process.exec(
+        'docker inspect -format "{{.State.Running}}" ' + fs.readFileSync(that.ccontainer.get('engine.cidfile'), { encoding : 'utf8' }),
+        function (error, stdout, stderr) {
+            if ('true' == stdout) {
+                callback(new Error('According to cidfile, a docker container already seems to be running.'));
+
+                return;
+            }
+
+            that.logger.info(
+                'container/cidfile',
+                'already exists, but seems to be stale'
+            );
+
+            fs.unlinkSync(that.ccontainer.get('engine.cidfile'));
+
+            callback();
+        }
+    );
+}
+
+// --
+
 Container.prototype.engineStop = function (callback) {
     if (!this.dockerProcessActive) {
         // this probably died and we don't need to signal it
@@ -121,9 +153,21 @@ Container.prototype.engineStart = function (callback) {
                 code
             );
 
-            if (this.dockerContainerId == fs.readFileSync(that.ccontainer.get('engine.cidfile'), { encoding : 'utf8' })) {
-                // odd edge case if it did not match
+            var ciddata = fs.readFileSync(that.ccontainer.get('engine.cidfile'), { encoding : 'utf8' });
+
+            if (that.dockerContainerId == ciddata) {
+                // it would be very odd if they did not match
+                that.logger.silly(
+                    'container/cidfile',
+                    'removing'
+                );
+
                 fs.unlinkSync(that.ccontainer.get('engine.cidfile'));
+            } else {
+                that.logger.info(
+                    'container/cidfile',
+                    'not removing (cidfile says "' + ciddata + '" but runtime says "' + that.dockerContainerId + '")'
+                );
             }
 
             if (this.dockerProcessActive) {

@@ -68,6 +68,13 @@ function createWorkflows () {
     workflows.down = new Workflow(null, this.logger, 'container/stop/hook:down', [ this.container ]);
     workflows.unload = new Workflow(null, this.logger, 'container/stop/hook:unload', [ this.container ]);
 
+    workflows.load.pushStep(
+        'engine',
+        function (workflow, callback, container) {
+            container.onContainerLoad(workflow, callback);
+        }
+    );
+
     function applyWorkflowEvent(name, that) {
         workflows.load.pushStep(name, that.onContainerLoad.bind(that));
         workflows.up.pushStep(name, that.onContainerUp.bind(that));
@@ -98,6 +105,13 @@ function createWorkflows () {
     Object.keys(this.container.ccontainer.get('dependency.require', {})).forEach(
         function (key) {
             applyWorkflowEvent('requirement/' + key, that.container.getRuntimeDependencyRequire(key));
+        }
+    );
+
+    workflows.load.pushStep(
+        'engine',
+        function (workflow, callback, container) {
+            container.onContainerUnload(workflow, callback);
         }
     );
 
