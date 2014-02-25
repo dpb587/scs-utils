@@ -55,7 +55,7 @@ function build_WriteDockerfile (workflow, callback, workdir) {
     dockerfile.push('FROM ' + this.cimage.get('engine.from'));
     dockerfile.push('ADD . /scs');
 
-    var volumeMap = this.cimage.get('dependency.volume');
+    var volumeMap = this.cimage.get('dependency.volume', {});
 
     Object.keys(volumeMap).forEach(
         function (name) {
