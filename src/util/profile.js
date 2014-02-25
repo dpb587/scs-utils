@@ -409,6 +409,19 @@ function recompileContainer (workflow, callback) {
         )
     );
 
+    var engineMethod = this.ccompiled.get('image.engine._method');
+
+    this.ccompiled.set(
+        'container.engine',
+        require('../image/engine/' + engineMethod + '/compiler').compileContainerConfig(
+            this.getContainerNames(),
+            [
+                this.ccompiled.get('global.container.engine.' + engineMethod, {}),
+                this.cruntime.get('container.engine', {})
+            ]
+        )
+    );
+
 
     this.ccompiled.set('container.dependency.provide', null);
 

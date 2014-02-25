@@ -71,7 +71,7 @@ Container.prototype.engineStart = function (callback) {
     );
 
     args.push('--name', 'scs-' + this.ccontainer.get('name.local') + '--' + this.id);
-    args.push('-cidfile', '/tmp/scs-' + this.id + '.cid');
+    args.push('-cidfile', this.ccontainer.get('engine.cidfile'));
     args.push('scs-' + this.cimage.get('id.uid'));
 
     this.logger.verbose(
@@ -116,12 +116,21 @@ Container.prototype.engineStart = function (callback) {
     dockerProcess.on(
         'exit',
         function (code) {
-            that.dockerProcessActive = false;
-
             that.logger.verbose(
                 'container/run/exit',
                 code
             );
+
+            if (this.dockerContainerId == fs.readFileSync(that.ccontainer.get('engine.cidfile'), { encoding : 'utf8' })) {
+                // odd edge case if it did not match
+                fs.unlinkSync(that.ccontainer.get('engine.cidfile'));
+            }
+
+            if (this.dockerProcessActive) {
+                that.dockerProcessActive = false;
+
+                this.dockerProcess.kill('SIGTERM');
+            }
         }
     );
 
@@ -130,7 +139,7 @@ Container.prototype.engineStart = function (callback) {
 
     setTimeout(
         function () {
-            that.dockerContainerId = fs.readFileSync('/tmp/scs-' + that.id + '.cid', { encoding : 'utf8' });
+            that.dockerContainerId = fs.readFileSync(that.ccontainer.get('engine.cidfile'), { encoding : 'utf8' });
 
             callback();
         },

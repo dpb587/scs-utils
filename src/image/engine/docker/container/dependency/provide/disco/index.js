@@ -68,6 +68,12 @@ Provision.prototype.onContainerStarted = function (steps, callback, container) {
 }
 
 Provision.prototype.onContainerStopped = function (steps, callback, container) {
+    if (!this.discoId) {
+        callback();
+
+        return;
+    }
+
     this.getDiscoClient(container).dropProvision(
         this.discoId,
         5000,

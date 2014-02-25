@@ -20,11 +20,13 @@ module.exports.compileImageConfig = function (configs) {
 
 
 module.exports.compileContainerConfig = function (names, configs) {
-    var cruntime = new Config();
+    var ccontainer = new Config();
+
+    ccontainer.set('cidfile', 'docker.cid');
 
     configs.forEach(function (config) {
-        cruntime.importObject(config);
+        ccontainer.importObject(config);
     });
 
-    return cruntime.config;
+    return ccontainer.config;
 }

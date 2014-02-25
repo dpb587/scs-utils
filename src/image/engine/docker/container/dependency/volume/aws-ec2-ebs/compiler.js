@@ -12,7 +12,7 @@ module.exports.compileContainerConfig = function (names, id, configs) {
     ccontainer.set('name.role', names.get('role') + '/' + id);
 
     ccontainer.set('mount.device', null);
-    ccontainer.set('mount.path', '/var/lib/scs-utils/volume--aws-ec2-ebs--' + names.get('local'));
+    ccontainer.set('mount.path', './' + id);
     ccontainer.set('mount.fstab', true);
 
     ccontainer.set('mkfs.type', 'ext4');

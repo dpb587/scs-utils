@@ -80,7 +80,10 @@ function createWorkflows () {
 
     applyWorkflowEvent('network', this.container.getRuntimeNetwork());
 
-    Object.keys(this.container.ccontainer.get('dependency.volume', {})).forEach(
+    var v = Object.keys(this.container.ccontainer.get('dependency.volume', {}));
+    v.sort();
+
+    v.forEach(
         function (key) {
             applyWorkflowEvent('volume/' + key, that.container.getRuntimeDependencyVolume(key));
         }

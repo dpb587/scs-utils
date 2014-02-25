@@ -94,7 +94,7 @@ Container.prototype.getRuntimeDependencyVolume = function (key) {
 
         this.runtimeDependencyVolume[key] = new mtype(
             key,
-            new Config(this.cimage.get('dependency.volume.' + key)),
+            new Config(this.cimage.get('dependency.volume.' + key, {})),
             new Config(this.ccontainer.get('dependency.volume.' + key)),
             this.logger
         );
