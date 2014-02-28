@@ -14,6 +14,103 @@ function Engine(cimage, logger) {
 
 // --
 
+Engine.prototype.importCachedImage = function (tmppath, callback) {
+    var that = this;
+    var fh = fs.createReadStream(tmppath);
+
+    var ps = child_process.spawn(
+        'docker',
+        [
+            'import',
+            '-',
+            'scs-' + this.cimage.get('id.uid')
+        ]
+    );
+
+    fh.pipe(ps.stdin);
+
+    ps.stdout.on(
+        'data',
+        function (data) {
+            that.logger.silly(
+                'image/engine/docker/import/stdout',
+                data.toString('utf8')
+            );
+        }
+    );
+
+    ps.stderr.on(
+        'data',
+        function (data) {
+            that.logger.silly(
+                'image/engine/docker/import/stderr',
+                data.toString('utf8')
+            );
+        }
+    );
+
+    ps.on(
+        'close',
+        function (code) {
+            if (code) {
+                callback(new Error('docker import exited with ' + code));
+
+                return;
+            }
+
+            callback();
+        }
+    );
+}
+
+Engine.prototype.exportCachedImage = function (tmppath, callback) {
+    var that = this;
+    var fh = fs.createWriteStream(tmppath);
+    
+    fh.on(
+        'open',
+        function () {
+            var ps = child_process.spawn(
+                'docker',
+                [
+                    'save',
+                    'scs-' + that.cimage.get('id.uid')
+                ],
+                {
+                    stdio: [
+                        'pipe',
+                        fh,
+                        'pipe'
+                    ]
+                }
+            );
+
+            ps.stderr.on(
+                'data',
+                function (data) {
+                    that.logger.silly(
+                        'image/engine/docker/export/stderr',
+                        data.toString('utf8')
+                    );
+                }
+            );
+
+            ps.on(
+                'close',
+                function (code) {
+                    if (code) {
+                        callback(new Error('docker export exited with ' + code));
+
+                        return;
+                    }
+
+                    callback();
+                }
+            );
+        }
+    );
+}
+
 Engine.prototype.hasImage = function (callback) {
     var that = this;
     var cmd = 'docker inspect "scs-' + this.cimage.get('id.uid') + '"';

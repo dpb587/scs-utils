@@ -1,4 +1,6 @@
 var crypto = require('crypto');
+var fs = require('fs');
+var os = require('os');
 
 var Config = require('./config');
 var Workflow = require('./workflow');
@@ -12,6 +14,7 @@ function Profile (cruntime, ccompiled, logger) {
     this.logger = logger;
 
     this.names = null;
+    this.imageCache = null;
     this.imageConfig = null;
     this.imageEngine = null;
     this.imageSource = null;
@@ -55,7 +58,72 @@ Profile.prototype.createTemporaryDirectory = function (callback) {
     callback(null, p);
 }
 
+Profile.prototype.importFromCache = function (callback) {
+    var that = this;
+    var tmppath = os.tmpdir() + '/scs-' + this.ccompiled.get('image.id.uid');
+
+    this.getImageCache().get(
+        'scs-' + this.ccompiled.get('image.id.uid'),
+        tmppath,
+        function (error, result) {
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            that.getImageEngine().importCachedImage(
+                tmppath,
+                function (error, result) {
+                    //fs.unlinkSync(tmppath);
+
+                    if (error) {
+                        callback(error);
+
+                        return;
+                    }
+
+                    callback();
+                }
+            );
+        }
+    );
+}
+
+Profile.prototype.exportToCache = function (callback) {
+    var that = this;
+    var tmppath = os.tmpdir() + '/scs-' + this.ccompiled.get('image.id.uid');
+
+    that.getImageEngine().exportCachedImage(
+        tmppath,
+        function (error, result) {
+            if (error) {
+                callback(error);
+
+                return;
+            }
+
+            that.getImageCache().put(
+                'scs-' + that.ccompiled.get('image.id.uid'),
+                tmppath,
+                function (error, result) {
+                    fs.unlinkSync(tmppath);
+
+                    if (error) {
+                        callback(error);
+
+                        return;
+                    }
+
+                    callback();
+                }
+            );
+        }
+    );
+}
+
 Profile.prototype.build = function (callback) {
+    var that = this;
     var workflow = new Workflow(this, this.logger, 'build');
 
     workflow.pushStep(
@@ -63,11 +131,57 @@ Profile.prototype.build = function (callback) {
         function (workflow, callback1) {
             this.getImageEngine().hasImage(
                 function (error, exists) {
-                    if (!exists) {
+                    if (error) {
+                        callback1(error);
+
+                        return;
+                    } else if (exists) {
+                        callback1();
+
+                        return;
+                    }
+
+                    if (that.getImageCache().isAvailable()) {
+                        workflow.unshiftStep(
+                            'cache-check',
+                            function (workflow, callback2) {
+                                this.getImageCache().has(
+                                    'scs-' + this.ccompiled.get('image.id.uid'),
+                                    function (error, exists1) {
+                                        if (error) {
+                                            callback2(error);
+
+                                            return;
+                                        } else if (exists1) {
+                                            workflow.unshiftStep(
+                                                'cache-get',
+                                                function (workflow, callback3) {
+                                                    that.importFromCache(callback3);
+                                                }
+                                            );
+
+                                            callback2();
+
+                                            return;
+                                        }
+
+                                        workflow.unshiftStep(
+                                            'rebuild',
+                                            function (workflow, callback3) {
+                                                this.rebuild(callback3);
+                                            }
+                                        )
+
+                                        callback2();
+                                    }
+                                );
+                            }
+                        );
+                    } else {
                         workflow.unshiftStep(
                             'rebuild',
-                            function (workflow, callback2) {
-                                this.rebuild(callback2);
+                            function (workflow, callback3) {
+                                this.rebuild(callback3);
                             }
                         )
                     }
@@ -127,6 +241,15 @@ Profile.prototype.rebuild = function (callback) {
             );
         }
     );
+
+    if (this.getImageCache().isAvailable()) {
+        workflow.pushStep(
+            'cache-put',
+            function (workflow, callback1) {
+                this.exportToCache(callback1);
+            }
+        );
+    }
 
     workflow.run(callback);
 }
@@ -576,6 +699,19 @@ Profile.prototype.getContainerNames = function () {
     }
 
     return this.names;
+}
+
+Profile.prototype.getImageCache = function () {
+    if (null === this.imageCache) {
+        var mtype = require('../image/cache/' + this.ccompiled.get('image.cache._method'));
+
+        this.imageCache = new mtype(
+            new Config(this.ccompiled.get('image.cache')),
+            this.logger
+        );
+    }
+
+    return this.imageCache;
 }
 
 Profile.prototype.getImageConfig = function () {

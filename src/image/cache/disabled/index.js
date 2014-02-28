@@ -7,15 +7,15 @@ Cache.prototype.isAvailable = function () {
     return false;
 }
 
-Cache.prototype.has = function (callback) {
+Cache.prototype.has = function (key, callback) {
     throw new Error('The disabled cache is not available.');
 }
 
-Cache.prototype.get = function (fp, callback) {
+Cache.prototype.get = function (key, fh, callback) {
     throw new Error('The disabled cache is not available.');
 }
 
-Cache.prototype.put = function (fp, callback) {
+Cache.prototype.put = function (key, fh, callback) {
     throw new Error('The disabled cache is not available.');
 }
 
