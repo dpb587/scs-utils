@@ -1,7 +1,5 @@
-Some tools for AWS cloud stuff...
+Some tools for running, managing, and connecting containers across hosts and data centers.
 
-    mkdir /usr/local/scs-utils
-    cd /usr/local/scs-utils
-    wget -O- https://github.com/dpb587/scs-docker-utils/archive/master.tar.gz | tar -xz --strip-components 1
-    pip install --upgrade -r requirements.txt
-    ln -s bin/* /usr/bin/
+Take a look at one of the example repos for a better introduction:
+
+ * [`scs-example-blog`](https://github.com/dpb587/scs-example-blog) - WordPress + MySQL master + MySQL slave
