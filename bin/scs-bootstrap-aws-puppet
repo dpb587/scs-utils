@@ -17,22 +17,24 @@ apt-get -y install git puppet python-pip
 
 
 # node
-mkdir /usr/local/nodejs
-pushd /usr/local/nodejs
-wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
-ln -s $PWD/bin/* /usr/bin/
-popd
+if [ ! -d /usr/local/nodejs ]; then
+  mkdir /usr/local/nodejs
+  pushd /usr/local/nodejs
+  wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
+  ln -s $PWD/bin/* /usr/bin/
+  popd
+fi
 
 
 # scs-utils
-mkdir /usr/local/scs-utils
-pushd /usr/local/scs-utils
-wget -O- https://github.com/dpb587/scs-utils/archive/master.tar.gz | tar -xz --strip-components 1
-pip install --upgrade -r requirements.txt
-npm install
-( cd node_modules/node-etcd/ && npm install && npm run-script build )
-ln -s $PWD/bin/* /usr/bin/
-popd
+if [ ! -d /usr/local/scs-utils ]; then
+  mkdir /usr/local/scs-utils
+  pushd /usr/local/scs-utils
+  wget -O- https://github.com/dpb587/scs-utils/archive/master.tar.gz | tar -xz --strip-components 1
+  npm install
+  ln -s $PWD/bin/* /usr/bin/
+  popd
+fi
 
 
 # cfn-bootstrap
