@@ -2,14 +2,14 @@ var child_process = require('child_process');
 
 // --
 
-function Network (cruntime, logger) {
-    this.cruntime = cruntime;
+function Network (ccontainer, logger) {
+    this.ccontainer = ccontainer;
     this.logger = logger;
 }
 
 Network.prototype.onContainerLoad = function (steps, callback, container) {
     child_process.exec(
-        'ip -f inet -o addr show dev ' + this.cruntime.get('interface') + ' | sed -r \'s/.*inet\\s+([^\\/]+).*/\\1/\'',
+        'ip -f inet -o addr show dev ' + this.ccontainer.get('interface') + ' | sed -r \'s/.*inet\\s+([^\\/]+).*/\\1/\'',
         function (error, stdout, stderr) {
             if (error) {
                 callback(error);

@@ -283,7 +283,7 @@ workflow_load.aws_mount = function (workflow, callback) {
                 return;
             }
 
-            waitForVolumeStatus.call(
+            waitForAttachmentReady.call(
                 that,
                 'in-use',
                 checkLocalAvailability
@@ -463,7 +463,7 @@ workflow_load.create_volume = function (workflow, callback) {
                 workflow_load.aws_mount
             );
 
-            waitForVolumeStatus.call(that, 'available', callback);
+            waitForAttachmentReady.call(that, 'available', callback);
         }
     );
 }
@@ -482,7 +482,7 @@ function remapTags(tags) {
     return remap;
 }
 
-function waitForVolumeStatus (status, callback) {
+function waitForAttachmentReady (status, callback) {
     var that = this;
 
     this.logger.silly(
@@ -513,7 +513,7 @@ function waitForVolumeStatus (status, callback) {
             } else {
                 setTimeout(
                     function () {
-                        waitForVolumeStatus.call(that, status, callback);
+                        waitForAttachmentReady.call(that, status, callback);
                     },
                     2000
                 );

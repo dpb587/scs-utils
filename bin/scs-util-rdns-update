@@ -1,64 +1,70 @@
-#!/usr/bin/env python
+#!/usr/bin/env node
 
-import argparse
-import boto.ec2
-import os
-import simplejson
-import subprocess
-import sys
-import time
-import urllib2
+var child_process = require('child_process');
 
-cli = argparse.ArgumentParser(description='Update a Reverse DNS entry with a DNS server.')
-cli.add_argument('dns', help='DNS server', metavar='IP')
-cli.add_argument('keypath', help='DNS private key to use for updates')
-cli.add_argument('ip', help='Local IP for the pointer')
-cli.add_argument('pointer', help='FQDN pointer value')
-cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+// --
 
-cliargs = cli.parse_args()
+var cli = new (require('argparse').ArgumentParser)({ description : 'Send a reverse DNS update.' });
 
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 
-#
-# setup our basics
-#
+cli.addArgument([ 'dns' ], { help : 'DNS server', metavar : 'IP' });
+cli.addArgument([ 'keypath' ], { help : 'DNS private key to use for updates' });
+cli.addArgument([ 'ip' ], { help : 'Local IP for the pointer' });
+cli.addArgument([ 'pointer' ], { help : 'FQDN pointer value' });
 
-DEVNULL = open(os.devnull, 'w')
+var cliargs = cli.parseArgs();
 
-if cliargs.verbose > 2:
-  TASK_STDOUT = sys.stdout
-  TASK_STDERR = sys.stderr
-else:
-  TASK_STDOUT = DEVNULL
-  TASK_STDERR = DEVNULL
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
 
+// --
 
-#
-# ready, set, go...
-#
+logger.silly('process/args', JSON.stringify(cliargs));
 
-stdout = []
-stdout.append('server %s' % cliargs.dns)
-stdout.append('zone %s.in-addr.arpa' % '.'.join(reversed(cliargs.ip.split('.')[:-1])))
-stdout.append('update delete %s.in-addr.arpa PTR' % '.'.join(reversed(cliargs.ip.split('.'))))
-stdout.append('update add %s.in-addr.arpa 300 PTR %s' % ( '.'.join(reversed(cliargs.ip.split('.'))), cliargs.pointer ))
-stdout.append('send')
+// --
 
-if cliargs.verbose > 1:
-  sys.stdout.write('sending dns update...\n')
+var reverseip = cliargs.ip.split('.');
+reverseip.reverse();
 
-p = subprocess.Popen(
-  '/usr/bin/nsupdate -k %s' % cliargs.keypath,
-  shell = True,
-  stdin = subprocess.PIPE,
-  stdout = DEVNULL,
-  stderr = DEVNULL,
-)
+var ps = child_process.spawn(
+    '/usr/bin/nsupdate',
+    [
+        '-k',
+        cliargs.keypath
+    ]
+);
 
-p.communicate(input = '\n'.join(stdout))
+ps.stdin.write('server ' + cliargs.dns + '\n');
+ps.stdin.write('zone ' + reverseip.slice(-3).join('.') + '.in-addr.arpa\n');
+ps.stdin.write('update delete ' + reverseip.join('.') + '.in-addr.arpa PTR' + '\n');
+ps.stdin.write('update add ' + reverseip.join('.') + '.in-addr.arpa 300 PTR ' + cliargs.pointer + '\n');
+ps.stdin.write('send' + '\n');
+ps.stdin.end();
 
-if 0 < p.returncode:
-  raise RuntimeError('nsupdate returned %s' % p.returncode)
+ps.stdout.on(
+    'data',
+    function (chunk) {
+        logger.verbose(
+            'nsupdate/stdout',
+            chunk.toString('utf8')
+        );
+    }
+);
 
-if cliargs.verbose > 0:
-  sys.stdout.write('sent dns update\n')
+ps.stderr.on(
+    'data',
+    function (chunk) {
+        logger.verbose(
+            'nsupdate/stderr',
+            chunk.toString('utf8')
+        );
+    }
+);
+
+ps.on(
+    'error',
+    function (error) {
+        throw error;
+    }
+);

@@ -1,59 +1,129 @@
-#!/usr/bin/env python
+#!/usr/bin/env node
 
-import argparse
-import boto.ec2
-import datetime
-import hashlib
-import os
-import simplejson
-import string
-import subprocess
-import sys
-import time
-import urllib2
-import yaml
+var child_process = require('child_process');
+var http = require('http');
 
-cli = argparse.ArgumentParser(description='Utility for applying the tri-name as the hostname. This command is idempotent.')
-cli.add_argument('--verbose', '-v', action='count', help='Use multiple times to increase verbosity: none = quiet, 1 = completions, 2 = summaries, 3 = details')
+var AWS = require('aws-sdk');
 
-cliargs = cli.parse_args()
+// --
 
-#
-# setup our basics
-#
+var cli = new (require('argparse').ArgumentParser)({ description : 'Update the local hostname based off AWS resource tags.' });
 
-DEVNULL = open(os.devnull, 'w')
+cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 
-if cliargs.verbose > 2:
-  TASK_STDOUT = None
-  TASK_STDERR = None
-else:
-  TASK_STDOUT = DEVNULL
-  TASK_STDERR = DEVNULL
+var cliargs = cli.parseArgs();
 
+var logger = require('npmlog');
+logger.level = cliargs.log_level;
 
-#
-# ready, set, go...
-#
+// --
 
-ec2instance = simplejson.loads(urllib2.urlopen('http://169.254.169.254/latest/dynamic/instance-identity/document').read())
-ec2api = boto.ec2.connect_to_region(ec2instance['region'])
+logger.silly('process/args', JSON.stringify(cliargs));
 
-instance = ec2api.get_all_instances([ ec2instance['instanceId'] ]).pop().instances.pop()
+// --
 
-hostname = '%s--%s--%s' % ( instance.tags['Environment'], instance.tags['Service'], instance.tags['Name'].replace('/', '--') )
+var reqdata = [];
+var apiClient;
+var apiInstance;
+var apiInstanceData = [];
+var apiTags;
 
-if cliargs.verbose > 1:
-  sys.stdout.write('updating hostname...\n')
+function remapTags(tags) {
+    var remap = {};
 
-open('/etc/hostname', 'w').write(hostname)
+    tags.forEach(
+        function (v) {
+            remap[v.Key] = v.Value;
+        }
+    );
 
-subprocess.check_call(
-  '/bin/hostname %s' % ( hostname ),
-  shell=True,
-  stdout=TASK_STDOUT,
-  stderr=TASK_STDERR
-)
+    return remap;
+}
 
-if cliargs.verbose > 0:
-  sys.stdout.write('updated hostname\n')
+function loadTags() {
+    apiClient.describeTags(
+        {
+            Filters : [
+                {
+                    Name : 'resource-id',
+                    Values : [ apiInstance.instanceId ]
+                }
+            ]
+        },
+        function (error, data) {
+            if (error) {
+                throw error;
+            }
+
+            apiTags = remapTags(data.Tags);
+
+            updateHostname();
+        }
+    );
+}
+
+function updateHostname() {
+    var cmd = '/bin/hostname "' + apiTags['Environment'] + '--' + apiTags['Service'] + '--' + apiTags['Name'].replace('/', '--') + '"';
+
+    logger.verbose(
+        'hostname/exec',
+        cmd
+    );
+
+    child_process.exec(
+        cmd,
+        function (error, stdout, stderr) {
+            if (stdout) {
+                logger.info(
+                    'hostname/stdout',
+                    stdout
+                );
+            }
+
+            if (stderr) {
+                logger.info(
+                    'hostname/stderr',
+                    stderr
+                );
+            }
+        }
+    );
+}
+
+var req = http.request(
+    {
+        host : '169.254.169.254',
+        path : '/latest/dynamic/instance-identity/document'
+    },
+    function (res) {
+        res.setEncoding('utf8');
+        res.on(
+            'data',
+            function (chunk) {
+                apiInstanceData.push(chunk);
+            }
+        );
+        res.on(
+            'end',
+            function () {
+                apiInstance = JSON.parse(apiInstanceData.join(''));
+                apiClient = new AWS.EC2(
+                    {
+                        region : apiInstance.region
+                    }
+                );
+
+                loadTags();
+            }
+        );
+    }
+);
+
+req.on(
+    'error',
+    function (error) {
+        throw error;
+    }
+);
+
+req.end();

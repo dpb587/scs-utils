@@ -4,6 +4,7 @@
         "argparse" : "*",
         "js-yaml" : "3.0.1",
         "node-uuid" : "1.4.1",
+        "netmask" : "1.0.4",
         "npmlog" : "0.0.6"
     },
     "devDependencies" : {
