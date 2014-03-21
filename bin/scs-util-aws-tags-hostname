@@ -63,7 +63,7 @@ function loadTags() {
 }
 
 function updateHostname() {
-    var cmd = '/bin/hostname "' + apiTags['Environment'] + '--' + apiTags['Service'] + '--' + apiTags['Name'].replace('/', '--') + '"';
+    var cmd = '/bin/hostname "' + apiTags['Environment'] + '--' + apiTags['Service'] + '--' + apiTags['Name'].replace('/', '--') + '" && /bin/hostname > /etc/hostname';
 
     logger.verbose(
         'hostname/exec',

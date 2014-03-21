@@ -18,6 +18,7 @@ function Profile (cruntime, ccompiled, logger) {
     this.imageConfig = null;
     this.imageEngine = null;
     this.imageSource = null;
+    this.imageLogs = null;
 }
 
 // --
@@ -311,10 +312,28 @@ function recompileImageUid (workflow, callback) {
     uidhash.update('engine: ' + hash.digest('hex') + '\n');
 
     hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.runtime', {})
+    data = this.ccompiled.getFlattenedPairs('image.logs', {})
     data.sort();
     hash.update(data.join('\n'));
-    uidhash.update('dependency: ' + hash.digest('hex') + '\n');
+    uidhash.update('logs: ' + hash.digest('hex') + '\n');
+
+    hash = crypto.createHash('sha1');
+    data = this.ccompiled.getFlattenedPairs('image.provide', {})
+    data.sort();
+    hash.update(data.join('\n'));
+    uidhash.update('provide: ' + hash.digest('hex') + '\n');
+
+    hash = crypto.createHash('sha1');
+    data = this.ccompiled.getFlattenedPairs('image.require', {})
+    data.sort();
+    hash.update(data.join('\n'));
+    uidhash.update('require: ' + hash.digest('hex') + '\n');
+
+    hash = crypto.createHash('sha1');
+    data = this.ccompiled.getFlattenedPairs('image.volume', {})
+    data.sort();
+    hash.update(data.join('\n'));
+    uidhash.update('volume: ' + hash.digest('hex') + '\n');
 
     hash = crypto.createHash('sha1');
     data = this.ccompiled.getFlattenedPairs('image.source', {})
@@ -353,10 +372,28 @@ Profile.prototype.recalculateCompiledUid = function () {
     uidhash.update('engine: ' + hash.digest('hex') + '\n');
 
     hash = crypto.createHash('sha1');
-    data = this.cruntime.getFlattenedPairs('image.runtime', {})
+    data = this.cruntime.getFlattenedPairs('image.logs', {})
     data.sort();
     hash.update(data.join('\n'));
-    uidhash.update('dependency: ' + hash.digest('hex') + '\n');
+    uidhash.update('logs: ' + hash.digest('hex') + '\n');
+
+    hash = crypto.createHash('sha1');
+    data = this.cruntime.getFlattenedPairs('image.provide', {})
+    data.sort();
+    hash.update(data.join('\n'));
+    uidhash.update('provide: ' + hash.digest('hex') + '\n');
+
+    hash = crypto.createHash('sha1');
+    data = this.cruntime.getFlattenedPairs('image.require', {})
+    data.sort();
+    hash.update(data.join('\n'));
+    uidhash.update('require: ' + hash.digest('hex') + '\n');
+
+    hash = crypto.createHash('sha1');
+    data = this.cruntime.getFlattenedPairs('image.volume', {})
+    data.sort();
+    hash.update(data.join('\n'));
+    uidhash.update('volume: ' + hash.digest('hex') + '\n');
 
     hash = crypto.createHash('sha1');
     data = this.cruntime.getFlattenedPairs('image.source', {})
@@ -453,18 +490,29 @@ function recompileImageManifest (workflow, callback) {
             this.ccompiled.set('image.config._method', configMethod);
 
 
-            this.ccompiled.set('image.dependency.provide', null);
+            this.ccompiled.set(
+                'image.logs',
+                require('../image/logs/compiler').compileImageConfig(
+                    [
+                        this.ccompiled.get('global.image.logs', {}),
+                        cimage.get('logs')
+                    ]
+                )
+            );
 
-            var provideMap = cimage.get('dependency.provide', {});
+
+            this.ccompiled.set('image.provide', null);
+
+            var provideMap = cimage.get('provide', {});
 
             Object.keys(provideMap).forEach(
                 function (key) {
                     this.ccompiled.set(
-                        'image.dependency.provide.' + key,
-                        require('../image/dependency/provide/compiler').compileImageConfig(
+                        'image.provide.' + key,
+                        require('../image/provide/compiler').compileImageConfig(
                             key,
                             [
-                                this.ccompiled.get('global.image.dependency.provide._default', {}),
+                                this.ccompiled.get('global.image.provide._default', {}),
                                 provideMap[key]
                             ]
                         )
@@ -473,18 +521,18 @@ function recompileImageManifest (workflow, callback) {
             );
 
 
-            this.ccompiled.set('image.dependency.require', null);
+            this.ccompiled.set('image.require', null);
 
-            var requireMap = cimage.get('dependency.require', {});
+            var requireMap = cimage.get('require', {});
 
             Object.keys(requireMap).forEach(
                 function (key) {
                     this.ccompiled.set(
-                        'image.dependency.require.' + key,
-                        require('../image/dependency/require/compiler').compileImageConfig(
+                        'image.require.' + key,
+                        require('../image/require/compiler').compileImageConfig(
                             key,
                             [
-                                this.ccompiled.get('global.image.dependency.require._default', {}),
+                                this.ccompiled.get('global.image.require._default', {}),
                                 requireMap[key]
                             ]
                         )
@@ -493,15 +541,15 @@ function recompileImageManifest (workflow, callback) {
             );
 
 
-            this.ccompiled.set('image.dependency.volume', null);
+            this.ccompiled.set('image.volume', null);
 
-            var volumeMap = cimage.get('dependency.volume', {});
+            var volumeMap = cimage.get('volume', {});
 
             Object.keys(volumeMap).forEach(
                 function (key) {
                     this.ccompiled.set(
-                        'image.dependency.volume.' + key,
-                        require('../image/dependency/volume/compiler').compileImageConfig(
+                        'image.volume.' + key,
+                        require('../image/volume/compiler').compileImageConfig(
                             key,
                             [
                                 this.ccompiled.get('global.image.volume._default', {}),
@@ -546,67 +594,67 @@ function recompileContainer (workflow, callback) {
     );
 
 
-    this.ccompiled.set('container.dependency.provide', null);
+    this.ccompiled.set('container.provide', null);
 
-    var provideMap = this.cruntime.get('container.dependency.provide', {});
+    var provideMap = this.cruntime.get('container.provide', {});
 
     Object.keys(provideMap).forEach(
         function (key) {
             var method = 'method' in provideMap[key]
                 ? provideMap[key].method
-                : this.ccompiled.get('global.container.dependency.provide._default._method', {})
+                : this.ccompiled.get('global.container.provide._default._method', {})
                 ;
 
             this.ccompiled.set(
-                'container.dependency.provide.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/provide/' + provideMap[key].method + '/compiler').compileContainerConfig(
+                'container.provide.' + key,
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/provide/' + provideMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [
-                        this.ccompiled.get('global.container.dependency.provide.' + method, {}),
+                        this.ccompiled.get('global.container.provide.' + method, {}),
                         'options' in provideMap[key] ? provideMap[key].options : {}
                     ]
                 )
             );
 
-            this.ccompiled.set('container.dependency.provide.' + key + '.method', null);
-            this.ccompiled.set('container.dependency.provide.' + key + '._method', method);
+            this.ccompiled.set('container.provide.' + key + '.method', null);
+            this.ccompiled.set('container.provide.' + key + '._method', method);
         }.bind(this)
     );
 
 
-    this.ccompiled.set('container.dependency.require', null);
+    this.ccompiled.set('container.require', null);
 
-    var requireMap = this.cruntime.get('container.dependency.require', {});
+    var requireMap = this.cruntime.get('container.require', {});
 
     Object.keys(requireMap).forEach(
         function (key) {
             var method = 'method' in requireMap[key]
                 ? requireMap[key].method
-                : this.ccompiled.get('global.container.dependency.require._default._method')
+                : this.ccompiled.get('global.container.require._default._method')
                 ;
 
             this.ccompiled.set(
-                'container.dependency.require.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/require/' + requireMap[key].method + '/compiler').compileContainerConfig(
+                'container.require.' + key,
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/require/' + requireMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [
-                        this.ccompiled.get('global.container.dependency.require.' + method, {}),
+                        this.ccompiled.get('global.container.require.' + method, {}),
                         'options' in requireMap[key] ? requireMap[key].options : {}
                     ]
                 )
             );
 
-            this.ccompiled.set('container.dependency.require.' + key + '.method', null);
-            this.ccompiled.set('container.dependency.require.' + key + '._method', method);
+            this.ccompiled.set('container.require.' + key + '.method', null);
+            this.ccompiled.set('container.require.' + key + '._method', method);
         }.bind(this)
     );
 
 
-    this.ccompiled.set('container.dependency.volume', null);
+    this.ccompiled.set('container.volume', null);
 
-    var volumeMap = this.cruntime.get('container.dependency.volume', {});
+    var volumeMap = this.cruntime.get('container.volume', {});
 
     Object.keys(volumeMap).forEach(
         function (key) {
@@ -616,8 +664,8 @@ function recompileContainer (workflow, callback) {
                 ;
 
             this.ccompiled.set(
-                'container.dependency.volume.' + key,
-                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/dependency/volume/' + volumeMap[key].method + '/compiler').compileContainerConfig(
+                'container.volume.' + key,
+                require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/volume/' + volumeMap[key].method + '/compiler').compileContainerConfig(
                     this.getContainerNames(),
                     key,
                     [
@@ -627,8 +675,8 @@ function recompileContainer (workflow, callback) {
                 )
             );
 
-            this.ccompiled.set('container.dependency.volume.' + key + '.method', null);
-            this.ccompiled.set('container.dependency.volume.' + key + '._method', method);
+            this.ccompiled.set('container.volume.' + key + '.method', null);
+            this.ccompiled.set('container.volume.' + key + '._method', method);
         }.bind(this)
     );
 
@@ -648,6 +696,24 @@ function recompileContainer (workflow, callback) {
     );
 
     this.ccompiled.set('container.network._method', networkMethod);
+
+
+    this.ccompiled.set('container.logs', null);
+
+    var logsMethod = this.cruntime.get('container.logs.method', 'lumberjack');
+
+    this.ccompiled.set(
+        'container.logs',
+        require('../image/engine/' + this.ccompiled.get('image.engine._method') + '/container/logs/' + logsMethod + '/compiler').compileContainerConfig(
+            this.getContainerNames(),
+            [
+                this.cruntime.get('container.logs.options', {})
+            ]
+        )
+    );
+
+    this.ccompiled.set('container.logs._method', networkMethod);
+
 
     callback();
 }

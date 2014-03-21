@@ -74,21 +74,22 @@ Container.prototype.engineStart = function (callback) {
 
     args.push('run');
 
-    var exposedPortMap = this.env.getAllExposedPorts();
+    if ('eth0' == this.env.getNetworkInternal().name) {
+        // assume typical routing
+        var exposedPortMap = this.env.getAllExposedPorts();
 
-    console.log(exposedPortMap)
-
-    Object.keys(exposedPortMap).forEach(
-        function (key) {
-            args.push('-p', (exposedPortMap[key].publishAddress ? exposedPortMap[key].publishAddress : '') + ':' + (exposedPortMap[key].publishPort ? exposedPortMap[key].publishPort : '') + ':' + exposedPortMap[key].port + '/' + exposedPortMap[key].protocol);
-        }
-    );
+        Object.keys(exposedPortMap).forEach(
+            function (key) {
+                args.push('-p', (exposedPortMap[key].publishAddress ? exposedPortMap[key].publishAddress : '') + ':' + (exposedPortMap[key].publishPort ? exposedPortMap[key].publishPort : '') + ':' + exposedPortMap[key].port + '/' + exposedPortMap[key].protocol);
+            }
+        );
+    }
 
     var volumeMap = this.env.getAllVolumes();
 
     Object.keys(volumeMap).forEach(
         function (key) {
-            args.push('-v', volumeMap[key] + ':/scs-mnt/' + key);
+            args.push('-v', volumeMap[key] + ':/mnt/' + key);
         }
     );
 
@@ -107,6 +108,7 @@ Container.prototype.engineStart = function (callback) {
     args.push('--name', 'scs-' + this.ccontainer.get('name.local') + '--' + this.id);
     args.push('-cidfile', this.ccontainer.get('engine.cidfile'));
     args.push('scs-' + this.cimage.get('id.uid'));
+    args.push(this.env.getNetworkInternal().name);
 
     this.logger.verbose(
         'container/run/env',

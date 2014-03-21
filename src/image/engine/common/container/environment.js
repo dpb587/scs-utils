@@ -29,10 +29,12 @@ Environment.prototype.getExposedPort = function (name) {
 
 // --
 
-Environment.prototype.setNetworkInternal = function (name, address) {
+Environment.prototype.setNetworkInternal = function (name, address, bitmask, gateway) {
     this.networkInternal = {
         name : name,
-        address : address
+        address : address,
+        bitmask : bitmask,
+        gateway : gateway
     };
 
     return this;
@@ -44,10 +46,12 @@ Environment.prototype.getNetworkInternal = function () {
 
 // --
 
-Environment.prototype.setNetworkExternal = function (name, address) {
+Environment.prototype.setNetworkExternal = function (name, address, bitmask, gateway) {
     this.networkExternal = {
         name : name,
-        address : address
+        address : address,
+        bitmask : bitmask,
+        gateway : gateway
     };
 
     return this;

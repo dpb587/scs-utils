@@ -5,7 +5,6 @@ var cli = new (require('argparse').ArgumentParser)({ description : 'Run a disco 
 cli.addArgument([ '--log-level' ], { help : 'logging level', defaultValue : 'info' });
 cli.addArgument([ '--disco-server' ], { help : 'disco server', defaultValue : '127.0.0.1:9640', metavar : 'HOST[:PORT]' });
 cli.addArgument([ '--forward' ], { help : 'forward a port to an endpoint', action : 'append', required : true, metavar : 'PORT:ENDPOINT[:ROLE][:SERVICE][:ENV]' });
-cli.addArgument([ '--host' ], { help : 'local hostname', defaultValue : 'localhost' });
 cli.addArgument([ '--ip' ], { help : 'ip address to bind to', defaultValue : '0.0.0.0' });
 cli.addArgument([ 'envname' ], { help : 'environment name', nargs : '?', defaultValue : 'default' });
 cli.addArgument([ 'servicename' ], { help : 'service name', nargs : '?', defaultValue : 'default' });
@@ -145,40 +144,7 @@ client.start();
 
 // --
 
-var cmd = [];
-
-if ('0.0.0.0' != cliargs.ip) {
-    cmd.push('ifconfig lo0 alias ' + cliargs.ip);
-}
-
-if ('localhost' != cliargs.host) {
-    cmd.push('(grep "' + cliargs.ip + ' ' + cliargs.host + '" /etc/hosts > /dev/null || echo "' + cliargs.ip + ' ' + cliargs.host + '" >> /etc/hosts)');
-}
-
-if (0 < cmd.length) {
-    cmd = cmd.join(' && ');
-
-    logger.silly('localhost/exec', cmd);
-
-    child_process.exec(
-        cmd,
-        function (error, stdout, stderr) {
-            logger.silly('localhost/stdout', stdout);
-            logger.silly('localhost/stderr', stderr);
-            logger.silly('localhost/code', error ? error.code : 0);
-
-            if (error) {
-                throw new Error('Unable to route');
-            }
-
-            logger.verbose('localhost', 'routed ' + cliargs.ip + ' to ' + cliargs.host);
-
-            registerForwarders();
-        }
-    );
-} else {
-    registerForwarders();
-}
+registerForwarders();
 
 // --
 

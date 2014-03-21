@@ -150,25 +150,24 @@ function build_WriteDockerfile (workflow, callback, workdir) {
     dockerfile = []
 
     dockerfile.push('FROM ' + this.cimage.get('engine.from'));
-    dockerfile.push('ADD . /scs');
+    dockerfile.push('ADD ./.build/logs.conf /etc/scs/logs.conf');
+    dockerfile.push('ADD . /scs-compile');
 
-    var volumeMap = this.cimage.get('dependency.volume', {});
+    var volumeMap = this.cimage.get('volume', {});
 
     Object.keys(volumeMap).forEach(
         function (name) {
-            dockerfile.push('VOLUME /scs-mnt/' + name);
+            dockerfile.push('VOLUME /mnt/' + name);
         }
     );
 
-    var provideMap = this.cimage.get('dependency.provide');
+    var provideMap = this.cimage.get('provide');
 
     Object.keys(provideMap).forEach(
         function (name) {
             dockerfile.push('EXPOSE ' + provideMap[name].port + '/' + provideMap[name].protocol);
         }
     );
-
-    dockerfile.push('WORKDIR /scs');
 
     var patchpre = this.cimage.get('engine.build_patch.pre', {});
 
@@ -178,8 +177,8 @@ function build_WriteDockerfile (workflow, callback, workdir) {
         }
     );
 
-    dockerfile.push('RUN ./scs/compile');
-    dockerfile.push('ENTRYPOINT [ "./scs/bin/run" ]');
+    dockerfile.push('RUN /scs-compile/.build/compile');
+    dockerfile.push('RUN rm -fr /scs-compile');
 
     var patchpost = this.cimage.get('engine.build_patch.post', {});
 
@@ -192,6 +191,32 @@ function build_WriteDockerfile (workflow, callback, workdir) {
     var p = workdir + '/Dockerfile';
 
     fs.writeFileSync(p, dockerfile.join('\n'));
+    fs.chmodSync(p, 0600);
+
+    callback(null, true);
+}
+
+function build_WriteLogsconf (workflow, callback, workdir) {
+    logs = []
+
+    var logMap = this.cimage.get('logs', {});
+
+    Object.keys(logMap).forEach(
+        function (name) {
+            logs.push(
+                [
+                    logMap[name].path,
+                    logMap[name].type,
+                    logMap[name].name,
+                    ''
+                ].join('\t')
+            );
+        }
+    );
+
+    var p = workdir + '/.build/logs.conf';
+
+    fs.writeFileSync(p, logs.join('\n'));
     fs.chmodSync(p, 0600);
 
     callback(null, true);
@@ -231,6 +256,11 @@ function build_PurgeOld (workflow, callback, workdir) {
 
 Engine.prototype.build = function (workdir, callback) {
     var workflow = new Workflow(this, this.logger, 'image/engine/docker/build', [ workdir ]);
+
+    workflow.pushStep(
+        'write-logsconf',
+        build_WriteLogsconf
+    );
 
     workflow.pushStep(
         'write-dockerfile',

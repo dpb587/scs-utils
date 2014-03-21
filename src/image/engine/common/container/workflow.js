@@ -87,24 +87,24 @@ function createWorkflows () {
 
     applyWorkflowEvent('network', this.container.getRuntimeNetwork());
 
-    var v = Object.keys(this.container.ccontainer.get('dependency.volume', {}));
+    var v = Object.keys(this.container.ccontainer.get('volume', {}));
     v.sort();
 
     v.forEach(
         function (key) {
-            applyWorkflowEvent('volume/' + key, that.container.getRuntimeDependencyVolume(key));
+            applyWorkflowEvent('volume/' + key, that.container.getRuntimeVolume(key));
         }
     );
 
-    Object.keys(this.container.ccontainer.get('dependency.provide', {})).forEach(
+    Object.keys(this.container.ccontainer.get('provide', {})).forEach(
         function (key) {
-            applyWorkflowEvent('provision/' + key, that.container.getRuntimeDependencyProvide(key));
+            applyWorkflowEvent('provision/' + key, that.container.getRuntimeProvide(key));
         }
     );
 
-    Object.keys(this.container.ccontainer.get('dependency.require', {})).forEach(
+    Object.keys(this.container.ccontainer.get('require', {})).forEach(
         function (key) {
-            applyWorkflowEvent('requirement/' + key, that.container.getRuntimeDependencyRequire(key));
+            applyWorkflowEvent('requirement/' + key, that.container.getRuntimeRequire(key));
         }
     );
 

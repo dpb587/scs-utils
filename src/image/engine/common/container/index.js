@@ -15,9 +15,9 @@ function Container(id, cimage, ccontainer, logger) {
 
     this.storage = {};
 
-    this.runtimeDependencyProvide = {};
-    this.runtimeDependencyRequire = {};
-    this.runtimeDependencyVolume = {};
+    this.runtimeProvide = {};
+    this.runtimeRequire = {};
+    this.runtimeVolume = {};
     this.runtimeNetwork = null;
 
     this.env = new ContainerEnvironment();
@@ -68,49 +68,49 @@ Container.prototype.onContainerUnload = function (workflow, callback) {
 
 // --
 
-Container.prototype.getRuntimeDependencyRequire = function (key) {
-    if (!(key in this.runtimeDependencyRequire)) {
-        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/dependency/require/' + this.ccontainer.get('dependency.require.' + key + '._method'));
+Container.prototype.getRuntimeRequire = function (key) {
+    if (!(key in this.runtimeRequire)) {
+        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/require/' + this.ccontainer.get('require.' + key + '._method'));
 
-        this.runtimeDependencyRequire[key] = new mtype(
+        this.runtimeRequire[key] = new mtype(
             key,
-            new Config(this.cimage.get('dependency.require.' + key)),
-            new Config(this.ccontainer.get('dependency.require.' + key)),
+            new Config(this.cimage.get('require.' + key)),
+            new Config(this.ccontainer.get('require.' + key)),
             this.logger
         );
     }
 
-    return this.runtimeDependencyRequire[key];
+    return this.runtimeRequire[key];
 }
 
-Container.prototype.getRuntimeDependencyProvide = function (key) {
-    if (!(key in this.runtimeDependencyProvide)) {
-        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/dependency/provide/' + this.ccontainer.get('dependency.provide.' + key + '._method'));
+Container.prototype.getRuntimeProvide = function (key) {
+    if (!(key in this.runtimeProvide)) {
+        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/provide/' + this.ccontainer.get('provide.' + key + '._method'));
 
-        this.runtimeDependencyProvide[key] = new mtype(
+        this.runtimeProvide[key] = new mtype(
             key,
-            new Config(this.cimage.get('dependency.provide.' + key)),
-            new Config(this.ccontainer.get('dependency.provide.' + key)),
+            new Config(this.cimage.get('provide.' + key)),
+            new Config(this.ccontainer.get('provide.' + key)),
             this.logger
         );
     }
 
-    return this.runtimeDependencyProvide[key];
+    return this.runtimeProvide[key];
 }
 
-Container.prototype.getRuntimeDependencyVolume = function (key) {
-    if (!(key in this.runtimeDependencyVolume)) {
-        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/dependency/volume/' + this.ccontainer.get('dependency.volume.' + key + '._method'));
+Container.prototype.getRuntimeVolume = function (key) {
+    if (!(key in this.runtimeVolume)) {
+        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/volume/' + this.ccontainer.get('volume.' + key + '._method'));
 
-        this.runtimeDependencyVolume[key] = new mtype(
+        this.runtimeVolume[key] = new mtype(
             key,
-            new Config(this.cimage.get('dependency.volume.' + key, {})),
-            new Config(this.ccontainer.get('dependency.volume.' + key)),
+            new Config(this.cimage.get('volume.' + key, {})),
+            new Config(this.ccontainer.get('volume.' + key)),
             this.logger
         );
     }
 
-    return this.runtimeDependencyVolume[key];
+    return this.runtimeVolume[key];
 }
 
 Container.prototype.getRuntimeNetwork = function () {
@@ -124,6 +124,19 @@ Container.prototype.getRuntimeNetwork = function () {
     }
 
     return this.runtimeNetwork;
+}
+
+Container.prototype.getRuntimeLogs = function () {
+    if (null == this.runtimeLogs) {
+        var mtype = require('../../' + this.cimage.get('engine._method') + '/container/logs/' + this.ccontainer.get('logs._method'));
+
+        this.runtimeLogs = new mtype(
+            new Config(this.ccontainer.get('logs')),
+            this.logger
+        );
+    }
+
+    return this.runtimeLogs;
 }
 
 // --

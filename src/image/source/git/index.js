@@ -76,7 +76,7 @@ Source.prototype.getCacheDirectory = function () {
 }
 
 function pullImageManifest(git, reference, git_dir, callback) {
-    var cmd = git + ' show ' + reference + ':scs/image.yaml';
+    var cmd = git + ' show ' + reference + ':scs.yaml';
 
     child_process.exec(
         cmd,
@@ -143,7 +143,16 @@ Source.prototype.createWorkingDirectory = function (workdir, callback) {
         }.bind(this)
     );
     workflow.pushStep('checkout', createWorkingDirectory_Checkout);
+    workflow.pushStep('dotbuild', createWorkingDirectory_DotBuild);
     workflow.run(callback);
+}
+
+function createWorkingDirectory_DotBuild (workflow, callback, workdir) {
+    if (!fs.existsSync(workdir + '/.build')) {
+        fs.mkdirSync(workdir + '/.build');
+    }
+
+    callback();
 }
 
 function createWorkingDirectory_Checkout (workflow, callback, workdir) {
