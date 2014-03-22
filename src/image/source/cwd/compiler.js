@@ -10,7 +10,7 @@ module.exports = {};
 module.exports.compileImageConfig = function (configs) {
     var ccontainer = new Config();
 
-    ccontainer.set('path', null);
+    ccontainer.set('path', '.');
 
     configs.forEach(function (config) {
         ccontainer.importObject(config);
