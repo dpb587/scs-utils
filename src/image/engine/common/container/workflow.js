@@ -13,19 +13,19 @@ function ContainerWorkflow(container, logger) {
 ContainerWorkflow.prototype.start = function (engineCommand, callback) {
     var command = new Workflow(this, this.logger, 'container/start');
 
-    command.pushStep('hook:load', function (workflow, callback1) {
+    command.pushStep('hook:load:meta', function (workflow, callback1) {
         this.workflows.load.run(callback1);
     });
 
-    command.pushStep('engine:start', function (workflow, callback1) {
+    command.pushStep('engine:start:meta', function (workflow, callback1) {
         engineCommand(callback1);
     });
 
-    command.pushStep('hook:up', function (workflow, callback1) {
+    command.pushStep('hook:up:meta', function (workflow, callback1) {
         this.workflows.up.run(callback1);
     });
 
-    command.pushStep('hook:started', function (workflow, callback1) {
+    command.pushStep('hook:started:meta', function (workflow, callback1) {
         this.workflows.started.run(callback1);
     });
 
@@ -35,19 +35,19 @@ ContainerWorkflow.prototype.start = function (engineCommand, callback) {
 ContainerWorkflow.prototype.stop = function (engineCommand, callback) {
     var command = new Workflow(this, this.logger, 'container/stop');
 
-    command.pushStep('hook:stopped', function (workflow, callback1) {
+    command.pushStep('hook:stopped:meta', function (workflow, callback1) {
         this.workflows.stopped.run(callback1);
     });
 
-    command.pushStep('engine:stop', function (workflow, callback1) {
+    command.pushStep('engine:stop:meta', function (workflow, callback1) {
         engineCommand(callback1);
     });
 
-    command.pushStep('hook:down', function (workflow, callback1) {
+    command.pushStep('hook:down:meta', function (workflow, callback1) {
         this.workflows.down.run(callback1);
     });
 
-    command.pushStep('hook:unload', function (workflow, callback1) {
+    command.pushStep('hook:unload:meta', function (workflow, callback1) {
         this.workflows.unload.run(callback1);
     });
 
