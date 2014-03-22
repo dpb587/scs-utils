@@ -57,7 +57,7 @@ fi
 # supervisor
 if ! which supervisorctl > /dev/null ; then
     apt-get install -y python-setuptools
-    easy_install supervisor
+    ( cd / ; easy_install supervisor )
     mkdir -p /var/{log,run}/supervisor
     mkdir -p /etc/supervisor
     cat > /etc/supervisor/supervisord.conf <<EOF
@@ -73,7 +73,7 @@ logfile_maxbytes=256MB
 logfile_backups=4
 loglevel=info
 pidfile=/var/run/supervisord.pid
-nodaemon=false
+nodaemon=true
 minfds=1024
 minprocs=200
 childlogdir=/var/log/supervisor
