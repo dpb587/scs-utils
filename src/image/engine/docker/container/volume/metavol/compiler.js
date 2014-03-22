@@ -1,3 +1,5 @@
+var path = require('path');
+
 var Config = require('../../../../../../util/config');
 
 // --

@@ -4,23 +4,23 @@ var utilfs = require('../../../../../../util/fs');
 
 // --
 
-function Volume(id, cimage, cruntime, logger) {
+function Volume(id, cimage, ccontainer, logger) {
     this.id = id;
     this.cimage = cimage;
-    this.cruntime = cruntime;
+    this.ccontainer = ccontainer;
     this.logger = logger;
 }
 
 Volume.prototype.onContainerLoad = function (steps, callback, container) {
-    if (!fs.existsSync(this.cruntime.get('path'))) {
-        if (true !== this.cruntime.get('autocreate')) {
-            throw new Error('The path "' + this.cruntime.get('path') + '" does not exist.');
+    if (!fs.existsSync(this.ccontainer.get('path'))) {
+        if (true !== this.ccontainer.get('autocreate')) {
+            throw new Error('The path "' + this.ccontainer.get('path') + '" does not exist.');
         }
 
-        utilfs.mkdirRecursiveSync(this.cruntime.get('path'), this.cruntime.get('mode'));
+        utilfs.mkdirRecursiveSync(this.ccontainer.get('path'), this.ccontainer.get('mode'));
     }
 
-    container.env.setVolume(this.id, this.cruntime.get('path'));
+    container.env.setVolume(this.id, this.ccontainer.get('path'));
 
     callback();
 }
@@ -42,8 +42,8 @@ Volume.prototype.onContainerDown = function (steps, callback, container) {
 }
 
 Volume.prototype.onContainerUnload = function (steps, callback, container) {
-    if (true === this.cruntime.get('autopurge')) {
-        fs.rmdirSync(this.cruntime.get('path'));
+    if (true === this.ccontainer.get('autopurge')) {
+        fs.rmdirSync(this.ccontainer.get('path'));
     }
 
     callback();

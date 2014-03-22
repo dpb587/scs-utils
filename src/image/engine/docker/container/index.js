@@ -89,6 +89,10 @@ Container.prototype.engineStart = function (callback) {
 
     Object.keys(volumeMap).forEach(
         function (key) {
+            if ('_' == key[0]) {
+                return;
+            }
+
             args.push('-v', volumeMap[key] + ':/mnt/' + key);
         }
     );

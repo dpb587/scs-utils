@@ -6,12 +6,14 @@ locale-gen en_US.UTF-8
 
 
 # apt-cacher
-echo "apt-cacher apt-cacher/mode select daemon" | debconf-set-selections
-apt-get -y install apt-cacher
-sed -i "s/#allowed_hosts = \*/allowed_hosts = */" /etc/apt-cacher/apt-cacher.conf
-sed -i "s/#allowed_ssl_locations =.*/allowed_ssl_locations = get.docker.io/" /etc/apt-cacher/apt-cacher.conf
-service apt-cacher restart
-echo 'Acquire::http::Proxy "http://127.0.0.1:3142";' > /etc/apt/apt.conf.d/01proxy
+if ! which apt-cacher > /dev/null ; then
+    echo "apt-cacher apt-cacher/mode select daemon" | debconf-set-selections
+    apt-get -y install apt-cacher
+    sed -i "s/#allowed_hosts = \*/allowed_hosts = */" /etc/apt-cacher/apt-cacher.conf
+    sed -i "s/#allowed_ssl_locations =.*/allowed_ssl_locations = get.docker.io/" /etc/apt-cacher/apt-cacher.conf
+    service apt-cacher restart
+    echo 'Acquire::http::Proxy "http://127.0.0.1:3142";' > /etc/apt/apt.conf.d/01proxy
+fi
 
 
 # core tools
@@ -19,42 +21,46 @@ apt-get -y install git
 
 
 # node
-mkdir /usr/local/nodejs
-pushd /usr/local/nodejs
-wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
-ln -s $PWD/bin/* /usr/bin/
-popd
+if [ ! -d /usr/local/nodejs ]; then
+    mkdir /usr/local/nodejs
+    pushd /usr/local/nodejs
+    wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
+    ln -s $PWD/bin/* /usr/bin/
+    popd
+fi
 
 
 # scs-utils
 if [ -e /vagrant/scs-utils ]; then
     ln -s /vagrant/scs-utils /usr/local/scs-utils
 else
-    git clone -b disco git@github.com:dpb587/scs-utils.git /usr/local/scs-utils
+    git clone git@github.com:dpb587/scs-utils.git /usr/local/scs-utils
 fi
 
 pushd /usr/local/scs-utils
 npm install
-ln -s $PWD/bin/* /usr/bin/
+ln -s $PWD/bin/* /usr/bin/ || true
 popd
 
 
 # docker
-wget -qO- https://get.docker.io/gpg | apt-key add -
-echo 'deb http://get.docker.io/ubuntu docker main' | tee /etc/apt/sources.list.d/docker.list
-apt-get update
-apt-get install -y linux-image-extra-`uname -r`
-apt-get install -y lxc-docker
-sed -i 's/DOCKER_OPTS=.*$/DOCKER_OPTS="--restart=false"/' /etc/init/docker.conf
-sed -i 's/^script$/limit nofile 32000 64000\n\nscript/' /etc/init/docker.conf
+if ! which docker > /dev/null ; then
+    wget -qO- https://get.docker.io/gpg | apt-key add -
+    echo 'deb http://get.docker.io/ubuntu docker main' | tee /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y linux-image-extra-`uname -r` lxc lxc-docker
+    sed -i 's/DOCKER_OPTS=.*$/DOCKER_OPTS="--restart=false -e lxc"/' /etc/init/docker.conf
+    sed -i 's/^script$/limit nofile 32000 64000\n\nscript/' /etc/init/docker.conf
+fi
 
 
 # supervisor
-apt-get install -y python-setuptools
-easy_install supervisor
-mkdir -p /var/{log,run}/supervisor
-mkdir -p /etc/supervisor
-cat > /etc/supervisor/supervisord.conf <<EOF
+if ! which supervisorctl > /dev/null ; then
+    apt-get install -y python-setuptools
+    easy_install supervisor
+    mkdir -p /var/{log,run}/supervisor
+    mkdir -p /etc/supervisor
+    cat > /etc/supervisor/supervisord.conf <<EOF
 [unix_http_server]
 file=/var/run/supervisor.sock   ; (the path to the socket file)
 
@@ -83,11 +89,12 @@ serverurl=unix:///var/run/supervisor.sock
 [include]
 files = /etc/supervisor/*.ini
 EOF
-cat > /etc/init/supervisor.conf <<EOF
+    cat > /etc/init/supervisor.conf <<EOF
 description "supervisor"
 start on runlevel [2345]
 stop on runlevel [!2345]
 respawn
 exec /usr/local/bin/supervisord -c /etc/supervisor/supervisord.conf
 EOF
-service supervisor start
+    service supervisor start
+fi

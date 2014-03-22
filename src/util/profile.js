@@ -293,55 +293,7 @@ Profile.prototype.compile = function (callback) {
 }
 
 function recompileImageUid (workflow, callback) {
-    var hash, data;
-
-    this.ccompiled.set('image.id.uid', null);
-
-    var uidhash = crypto.createHash('sha1');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.config', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('config: ' + hash.digest('hex') + '\n');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.engine', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('engine: ' + hash.digest('hex') + '\n');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.logs', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('logs: ' + hash.digest('hex') + '\n');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.provide', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('provide: ' + hash.digest('hex') + '\n');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.require', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('require: ' + hash.digest('hex') + '\n');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.volume', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('volume: ' + hash.digest('hex') + '\n');
-
-    hash = crypto.createHash('sha1');
-    data = this.ccompiled.getFlattenedPairs('image.source', {})
-    data.sort();
-    hash.update(data.join('\n'));
-    uidhash.update('source: ' + hash.digest('hex') + '\n');
-
-    this.ccompiled.set('image.id.uid', uidhash.digest('hex'));
+    this.ccompiled.set('image.id.uid', this.recalculateCompiledUid());
 
     callback();
 };

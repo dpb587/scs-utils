@@ -1,3 +1,4 @@
+var path = require('path');
 var util = require('util');
 
 var Config = require('../../../../../../util/config');
@@ -20,6 +21,8 @@ module.exports.compileContainerConfig = function (names, id, configs) {
     configs.forEach(function (config) {
         ccontainer.importObject(config);
     });
+
+    ccontainer.set('path', path.resolve(process.cwd(), ccontainer.get('path')));
 
     return ccontainer.config;
 }
