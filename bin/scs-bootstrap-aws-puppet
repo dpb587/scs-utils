@@ -17,7 +17,7 @@ apt-get -y install git puppet python-pip
 
 
 # node
-if [ ! -d /usr/local/nodejs ]; then
+if [[ ! -d /usr/local/nodejs ]]; then
   mkdir /usr/local/nodejs
   pushd /usr/local/nodejs
   wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
@@ -27,7 +27,7 @@ fi
 
 
 # scs-utils
-if [ ! -d /usr/local/scs-utils ]; then
+if [[ ! -d /usr/local/scs-utils ]]; then
   mkdir /usr/local/scs-utils
   pushd /usr/local/scs-utils
   wget -O- https://github.com/dpb587/scs-utils/archive/master.tar.gz | tar -xz --strip-components 1
@@ -43,7 +43,7 @@ cfn-init --verbose --region "$1" --stack "$2" --resource "$3"
 
 
 # optional custom script
-if [ "" != $4 ]; then
+if [[ "" != $4 ]]; then
     $4
 fi
 

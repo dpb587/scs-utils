@@ -21,7 +21,7 @@ apt-get -y install git
 
 
 # node
-if [ ! -d /usr/local/nodejs ]; then
+if [[ ! -d /usr/local/nodejs ]]; then
     mkdir /usr/local/nodejs
     pushd /usr/local/nodejs
     wget -O- http://nodejs.org/dist/v0.10.25/node-v0.10.25-linux-x64.tar.gz | tar -xz --strip-components 1
@@ -31,8 +31,8 @@ fi
 
 
 # scs-utils
-if [ -e /vagrant/scs-utils ]; then
-    ln -s /vagrant/scs-utils /usr/local/scs-utils
+if [[ -e /vagrant/scs-utils ]]; then
+    [[ -e /usr/local/scs-utils ]] || ln -s /vagrant/scs-utils /usr/local/scs-utils
 else
     git clone git@github.com:dpb587/scs-utils.git /usr/local/scs-utils
 fi
