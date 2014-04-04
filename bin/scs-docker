@@ -31,11 +31,13 @@ var profile;
 
 // --
 
-process.on('exit', function () {
+function writeCompiled(callback) {
     if (profile && profile.ccompiled) {
         fs.writeFileSync(cliargs.compiled_file, JSON.stringify(profile.ccompiled.config, null, 2));
     }
-});
+
+    callback();
+}
 
 process.on('uncaughtException', function (error) {
     logger.error('process/error', error.toString());
@@ -83,7 +85,11 @@ switch (cliargs.command) {
         workflow.pushStep(
             'compile',
             function (workflow, callback) {
-                profile.compile(callback);
+                profile.compile(
+                    function () {
+                        writeCompiled(callback);
+                    }
+                );
             }
         );
 
@@ -99,7 +105,11 @@ switch (cliargs.command) {
         workflow.pushStep(
             'recompile',
             function (workflow, callback) {
-                profile.recompile(callback);
+                profile.recompile(
+                    function () {
+                        writeCompiled(callback);
+                    }
+                );
             }
         );
 
@@ -115,7 +125,11 @@ switch (cliargs.command) {
         workflow.pushStep(
             'compile',
             function (workflow, callback) {
-                profile.compile(callback);
+                profile.compile(
+                    function () {
+                        writeCompiled(callback);
+                    }
+                );
             }
         );
 
@@ -124,7 +138,11 @@ switch (cliargs.command) {
         workflow.pushStep(
             'recompile',
             function (workflow, callback) {
-                profile.recompile(callback);
+                profile.recompile(
+                    function () {
+                        writeCompiled(callback);
+                    }
+                );
             }
         );
 
@@ -133,7 +151,11 @@ switch (cliargs.command) {
         workflow.pushStep(
             'compile',
             function (workflow, callback) {
-                profile.compile(callback);
+                profile.compile(
+                    function () {
+                        writeCompiled(callback);
+                    }
+                );
             }
         );
 

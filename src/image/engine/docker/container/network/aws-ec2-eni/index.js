@@ -35,14 +35,22 @@ Network.prototype.onContainerLoad = function (steps, callback, container) {
                 return;
             }
 
+            container.env.setNetworkMode('physical');
+
             container.env.setNetworkInternal(
-                this.ccontainer.get('container.device')
+                this.ccontainer.get('container.device'),
+                this.apiNetworkInterface.PrivateIpAddress,
+                this.apiSubnetBlock.bitmask,
+                this.apiSubnetBlock.first,
+                this.apiNetworkInterface.MacAddress
             );
 
             container.env.setNetworkExternal(
                 this.ccontainer.get('host.device'),
                 this.apiNetworkInterface.PrivateIpAddress,
-                this.apiSubnetBlock.bitmask
+                this.apiSubnetBlock.bitmask,
+                this.apiSubnetBlock.first,
+                this.apiNetworkInterface.MacAddress
             );
 
             callback();

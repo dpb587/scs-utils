@@ -8,7 +8,7 @@ module.exports.compileContainerConfig = function (names, configs) {
     var ccontainer = new Config();
 
     ccontainer.set('host.device', 'eth1');
-    ccontainer.set('container.device', 'eth1');
+    ccontainer.set('container.device', 'eth0');
 
     ccontainer.set('network.eni', null);
 

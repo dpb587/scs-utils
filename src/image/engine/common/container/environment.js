@@ -1,5 +1,6 @@
 function Environment() {
     this.exposedPorts = {};
+    this.networkMode = 'default';
     this.networkInternal = {};
     this.networkExternal = {};
     this.variables = {};
@@ -29,12 +30,23 @@ Environment.prototype.getExposedPort = function (name) {
 
 // --
 
-Environment.prototype.setNetworkInternal = function (name, address, bitmask, gateway) {
+Environment.prototype.setNetworkMode = function (mode) {
+    this.networkMode = mode;
+
+    return this;
+}
+
+Environment.prototype.getNetworkMode = function () {
+    return this.networkMode;
+}
+
+Environment.prototype.setNetworkInternal = function (name, address, bitmask, gateway, hwaddr) {
     this.networkInternal = {
         name : name,
         address : address,
         bitmask : bitmask,
-        gateway : gateway
+        gateway : gateway,
+        hwaddr : hwaddr
     };
 
     return this;
@@ -46,12 +58,13 @@ Environment.prototype.getNetworkInternal = function () {
 
 // --
 
-Environment.prototype.setNetworkExternal = function (name, address, bitmask, gateway) {
+Environment.prototype.setNetworkExternal = function (name, address, bitmask, gateway, hwaddr) {
     this.networkExternal = {
         name : name,
         address : address,
         bitmask : bitmask,
-        gateway : gateway
+        gateway : gateway,
+        hwaddr : hwaddr
     };
 
     return this;

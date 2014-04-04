@@ -74,7 +74,7 @@ Container.prototype.engineStart = function (callback) {
 
     args.push('run');
 
-    if ('eth0' == this.env.getNetworkInternal().name) {
+    if ('default' == this.env.getNetworkMode()) {
         // assume typical routing
         var exposedPortMap = this.env.getAllExposedPorts();
 
@@ -109,10 +109,31 @@ Container.prototype.engineStart = function (callback) {
         }
     );
 
+    var rinterface;
+
+    if ('physical' == this.env.getNetworkMode()) {
+        if ('eth0' == this.env.getNetworkExternal().name) {
+            throw new Error('sanity check: would detach eth0');
+        }
+
+        args.push('--lxc-conf=lxc.network.type=phys');
+        args.push('--lxc-conf=lxc.network.link=' + this.env.getNetworkExternal().name);
+        args.push('--lxc-conf=lxc.network.name=' + this.env.getNetworkExternal().name);
+        args.push('--lxc-conf=lxc.network.hwaddr=' + this.env.getNetworkExternal().hwaddr);
+        args.push('--lxc-conf=lxc.network.flags=up');
+        args.push('--lxc-conf=lxc.network.ipv4=' + this.env.getNetworkExternal().address + '/' + this.env.getNetworkExternal().bitmask);
+        args.push('--lxc-conf=lxc.network.ipv4.gateway=' + this.env.getNetworkExternal().gateway);
+        args.push('--networking=false');
+
+        rinterface = this.env.getNetworkExternal().name;
+    } else {
+        rinterface = this.env.getNetworkInternal().name;
+    }
+
     args.push('--name', 'scs-' + this.ccontainer.get('name.local') + '--' + this.id);
     args.push('-cidfile', this.ccontainer.get('engine.cidfile'));
     args.push('scs-' + this.cimage.get('id.uid'));
-    args.push(this.env.getNetworkInternal().name);
+    args.push(this.env.getNetworkExternal().name);
 
     this.logger.verbose(
         'container/run/env',
