@@ -36,7 +36,6 @@ Volume.prototype.onContainerLoad = function (steps, callback, container) {
                 return;
             }
 
-
             container.env.setVolume(this.id, this.ccontainer.get('mount.path'));
 
             callback();

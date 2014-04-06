@@ -37,7 +37,7 @@ function setContext(context, name, value, overwrite, fullpath) {
 
             Object.keys(value).forEach(
                 function (iname) {
-                    setContext(context[split[0]], iname, value[iname], overwrite, fullpath + '.' + iname);
+                    setContext(context[split[0]], [ iname ], value[iname], overwrite, fullpath + '.' + iname);
                 }
             );
         } else if (!(split[0] in context) || (overwrite)) {
