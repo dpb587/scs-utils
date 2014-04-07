@@ -25,13 +25,13 @@ function writePuppetConfigurationStep (workflow, callback, workdir) {
     Object.keys(config).forEach(
         function (part) {
             if ('main' == part) {
-                puppetfile.push('ensure_resource("class", "scs", parseyaml("' + yaml.safeDump(config[part]).replace(/"/g, '\\"') + '"))');
+                puppetfile.push('ensure_resource("class", "scs", parseyaml("' + yaml.safeDump(config[part]).replace(/"/g, '\\"').replace(/\\n/g, '\\\\n') + '"))');
             } else if ('puppet' == part) {
                 Object.keys(config[part]).forEach(
                     function (ptype) {
                         Object.keys(config[part][ptype]).forEach(
                             function (pname) {
-                                puppetfile.push('ensure_resource("' + ptype + '", "' + pname + '", parseyaml("' + yaml.safeDump(config[part][ptype][pname]).replace(/"/g, '\\"') + '"))');
+                                puppetfile.push('ensure_resource("' + ptype + '", "' + pname + '", parseyaml("' + yaml.safeDump(config[part][ptype][pname]).replace(/"/g, '\\"').replace(/\\n/g, '\\\\n') + '"))');
                             }
                         );
                     }
@@ -41,7 +41,7 @@ function writePuppetConfigurationStep (workflow, callback, workdir) {
             } else {
                 Object.keys(config[part]).forEach(
                     function (name) {
-                        puppetfile.push('ensure_resource("scs::' + part + '", "' + name + '", parseyaml("' + yaml.safeDump(config[part][name]).replace(/"/g, '\\"') + '"))');
+                        puppetfile.push('ensure_resource("scs::' + part + '", "' + name + '", parseyaml("' + yaml.safeDump(config[part][name]).replace(/"/g, '\\"').replace(/\\n/g, '\\\\n') + '"))');
                     }
                 );
             }
